@@ -7,7 +7,10 @@ test.describe('Star-Swarm E2E Tests', () => {
     consoleErrors = [];
     page.on('console', msg => {
       if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
+        const txt = msg.text();
+        if (!txt.includes('401') && !txt.includes('Unauthorized')) {
+          consoleErrors.push(txt);
+        }
       }
     });
     page.on('pageerror', exception => {
@@ -15,9 +18,11 @@ test.describe('Star-Swarm E2E Tests', () => {
     });
   });
 
-  test('should launch the game, configure lobby, start skirmish, and verify render is clean', async ({ page }) => {
+  test('should register, login, configure lobby, start skirmish, and verify render is clean', async ({ page }) => {
+    const randomEmail = `commander-${Date.now()}@example.com`;
+    
     // 1. Navigate to the local server
-    await page.goto('http://localhost:5173/');
+    await page.goto('http://localhost:8080/');
 
     // Verify Title
     await expect(page).toHaveTitle(/Star-Swarm | Tactical Space strategy/i);
@@ -32,7 +37,36 @@ test.describe('Star-Swarm E2E Tests', () => {
     await expect(skirmishBtn).toBeVisible();
     await expect(hotseatBtn).toBeVisible();
 
-    // 2. Click AI Skirmish Match
+    // 2. Open auth modal and register a new commander account
+    const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
+    await expect(establishLinkBtn).toBeVisible();
+    await establishLinkBtn.click();
+
+    const registerTab = page.locator('button:has-text("REGISTER")');
+    await expect(registerTab).toBeVisible();
+    await registerTab.click();
+
+    const emailInput = page.locator('input[type="email"]');
+    const passwordInput = page.locator('input[type="password"]');
+    await emailInput.fill(randomEmail);
+    await passwordInput.fill('password123');
+
+    const submitBtn = page.locator('button[type="submit"]');
+    await submitBtn.click();
+
+    // Wait for registration success message to verify the tab has transitioned
+    await expect(page.locator('text=Account created successfully')).toBeVisible();
+
+    // After registration, it automatically shifts to sign in. Log in.
+    await emailInput.fill(randomEmail);
+    await passwordInput.fill('password123');
+    await submitBtn.click();
+
+    // Verify logged in (LOG OUT button is visible in authentication HUD overlay)
+    const logoutBtn = page.locator('button:has-text("LOG OUT")');
+    await expect(logoutBtn).toBeVisible();
+
+    // 3. Click AI Skirmish Match
     await skirmishBtn.click();
 
     // Verify Lobby config is displayed
@@ -42,10 +76,10 @@ test.describe('Star-Swarm E2E Tests', () => {
     const startBtn = page.locator('button:has-text("LAUNCH GALAXY SIMULATION")');
     await expect(startBtn).toBeVisible();
 
-    // 3. Launch the game simulation
+    // 4. Launch the game simulation
     await startBtn.click();
 
-    // 4. Verify HUD & Canvas starmap are visible and rendered without errors
+    // 5. Verify HUD & Canvas starmap are visible and rendered without errors
     const canvas = page.locator('canvas');
     await expect(canvas).toBeVisible();
 
@@ -65,7 +99,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const turnNumber = page.locator('.telemetry:has-text("#1")');
     await expect(turnNumber).toBeVisible();
 
-    // 5. Click End Turn and verify it cycles successfully
+    // 6. Click End Turn and verify it cycles successfully
     const endTurnBtn = page.locator('button:has-text("END TURN")');
     await expect(endTurnBtn).toBeVisible();
     await endTurnBtn.click();

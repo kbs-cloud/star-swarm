@@ -7,6 +7,8 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
 - **Interactive Canvas Star Map**: Smooth mouse/trackpad panning and mouse wheel zoom, featuring vector travel tracking lines, sensor range rings, and fog of war.
 - **Deep Economic & Production Systems**: Manage shipyards, queue ships (Fighters, Corvettes, Destroyers, Cruisers), upgrade systems, and customize production clusters.
 - **Flexible Setup Lobby**: Configure 2 to 8 players, customize names and teams, and choose between Human or AI controllers with smart map parameter recommendations.
+- **Database Game Persistence**: Matches are saved directly to the database. Resume your active games at any time, with turns, fleets, and ship queues fully preserved.
+- **URL-Based Resuming & Sharing**: Every match has a dedicated URL query param (`?gameId=UUID`), enabling you to bookmark your sessions or share the link to load the same game elsewhere.
 - **Persistent User Accounts**: Secure server-side registration and authentication via SQLite database storage and password hashing.
 - **Integrated Google Sign-in**: Simulated OAuth account selector that links Gmail accounts automatically and tracks career victory telemetry.
 - **Secrecy Gate for Hotseat Multiplayer**: Screen lockdown and secrecy gates that hide sensor layouts and system statistics between turns to prevent screen-peeping during hotseat matches.

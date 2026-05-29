@@ -45,6 +45,19 @@ function initializeTables() {
         FOREIGN KEY(email) REFERENCES users(email) ON DELETE CASCADE
       )
     `);
+
+    // Games table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS games (
+        id TEXT PRIMARY KEY,
+        owner_email TEXT,
+        name TEXT,
+        game_state TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(owner_email) REFERENCES users(email) ON DELETE CASCADE
+      )
+    `);
   });
 }
 
@@ -338,6 +351,171 @@ app.post('/api/logout', (req, res) => {
   }
   res.clearCookie('session_id');
   res.status(200).json({ success: true, message: 'Logged out successfully.' });
+});
+
+// Endpoint: List active games for logged in user
+app.get('/api/games', (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    db.all(
+      'SELECT id, name, created_at, updated_at FROM games WHERE owner_email = ? ORDER BY updated_at DESC',
+      [user.email],
+      (queryErr, rows) => {
+        if (queryErr) {
+          console.error('Error fetching games:', queryErr.message);
+          return res.status(500).json({ error: 'Failed to fetch saved games.' });
+        }
+        res.status(200).json({ success: true, games: rows });
+      }
+    );
+  });
+});
+
+// Endpoint: Create a new game entry in DB
+app.post('/api/games', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    const { name, game_state } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ error: 'Invalid game name.' });
+    }
+    if (!game_state) {
+      return res.status(400).json({ error: 'Missing game state.' });
+    }
+    const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
+    
+    const gameId = crypto.randomUUID();
+    
+    db.run(
+      'INSERT INTO games (id, owner_email, name, game_state) VALUES (?, ?, ?, ?)',
+      [gameId, user.email, name.trim(), gameStateStr],
+      function (insertErr) {
+        if (insertErr) {
+          console.error('Error creating game:', insertErr.message);
+          return res.status(500).json({ error: 'Failed to create game session.' });
+        }
+        res.status(201).json({
+          success: true,
+          gameId,
+          name: name.trim(),
+          message: 'Game simulation saved to database.'
+        });
+      }
+    );
+  });
+});
+
+// Endpoint: Fetch a specific game state by ID
+app.get('/api/games/:id', (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    const gameId = req.params.id;
+    db.get(
+      'SELECT id, owner_email, name, game_state, created_at, updated_at FROM games WHERE id = ?',
+      [gameId],
+      (queryErr, row) => {
+        if (queryErr) {
+          console.error('Error fetching game:', queryErr.message);
+          return res.status(500).json({ error: 'Database error fetching game.' });
+        }
+        if (!row) {
+          return res.status(404).json({ error: 'Game simulation not found.' });
+        }
+        
+        let parsedState;
+        try {
+          parsedState = JSON.parse(row.game_state);
+        } catch (parseErr) {
+          return res.status(500).json({ error: 'Game state corruption detected.' });
+        }
+        
+        res.status(200).json({
+          success: true,
+          game: {
+            id: row.id,
+            ownerEmail: row.owner_email,
+            name: row.name,
+            gameState: parsedState,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+          }
+        });
+      }
+    );
+  });
+});
+
+// Endpoint: Update an existing game state by ID
+app.put('/api/games/:id', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    const gameId = req.params.id;
+    const { game_state } = req.body;
+    if (!game_state) {
+      return res.status(400).json({ error: 'Missing game state for update.' });
+    }
+    const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
+    
+    db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
+      if (findErr) {
+        return res.status(500).json({ error: 'Database validation error.' });
+      }
+      if (!row) {
+        return res.status(404).json({ error: 'Game not found.' });
+      }
+      
+      const now = new Date().toISOString();
+      db.run(
+        'UPDATE games SET game_state = ?, updated_at = ? WHERE id = ?',
+        [gameStateStr, now, gameId],
+        function (updateErr) {
+          if (updateErr) {
+            console.error('Error updating game:', updateErr.message);
+            return res.status(500).json({ error: 'Failed to update game state.' });
+          }
+          res.status(200).json({ success: true, message: 'Game state updated successfully.' });
+        }
+      );
+    });
+  });
+});
+
+// Endpoint: Delete (decommission) a specific game simulation
+app.delete('/api/games/:id', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    const gameId = req.params.id;
+    
+    db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
+      if (findErr) {
+        return res.status(500).json({ error: 'Database validation error.' });
+      }
+      if (!row) {
+        return res.status(404).json({ error: 'Game not found.' });
+      }
+      if (row.owner_email !== user.email) {
+        return res.status(403).json({ error: 'Forbidden. Only the creator can decommission this simulation.' });
+      }
+      
+      db.run('DELETE FROM games WHERE id = ?', [gameId], function (deleteErr) {
+        if (deleteErr) {
+          console.error('Error deleting game:', deleteErr.message);
+          return res.status(500).json({ error: 'Failed to delete game.' });
+        }
+        res.status(200).json({ success: true, message: 'Game decommissioned successfully.' });
+      });
+    });
+  });
 });
 
 // Start Express server

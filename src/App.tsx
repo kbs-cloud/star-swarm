@@ -24,6 +24,14 @@ import {
   initCSRF,
   checkSession
 } from './game/auth';
+import {
+  listGames,
+  createGame,
+  getGame,
+  updateGame,
+  deleteGame,
+  GameMetadata
+} from './game/gameApi';
 
 type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over';
 
@@ -41,6 +49,12 @@ export default function App() {
   const [gridSize, setGridSize] = useState<number>(60);
   const [systemCount, setSystemCount] = useState<number>(18);
   
+  // Persistent Database Game States
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
+  const [savedGames, setSavedGames] = useState<GameMetadata[]>([]);
+  const [isLoadingGame, setIsLoadingGame] = useState(false);
+  const [gameToDelete, setGameToDelete] = useState<GameMetadata | null>(null);
+
   // Players configuration setup
   const [playersSetup, setPlayersSetup] = useState<PlayerSetup[]>([
     { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff' },
@@ -76,6 +90,69 @@ export default function App() {
   // Map settings notice
   const [recNotice, setRecNotice] = useState<string | null>(null);
 
+  // Helper: Load saved games list from database
+  const loadGamesList = async () => {
+    const res = await listGames();
+    if (res.success && res.games) {
+      setSavedGames(res.games);
+    }
+  };
+
+  // Helper: Fetch and load game by ID
+  const loadGameFromId = async (id: string) => {
+    setIsLoadingGame(true);
+    const res = await getGame(id);
+    setIsLoadingGame(false);
+    if (res.success && res.game) {
+      setGameState(res.game.gameState);
+      setActiveGameId(res.game.id);
+      
+      // Determine gameMode (skirmish vs hotseat) from players
+      const hasMultipleHumans = res.game.gameState.players.filter(p => p.type === 'human').length > 1;
+      setGameMode(hasMultipleHumans ? 'hotseat' : 'skirmish');
+      
+      // Update players setup to match
+      const setup = res.game.gameState.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        team: p.team,
+        color: p.color
+      }));
+      setPlayersSetup(setup);
+      setScreen('game');
+    } else {
+      showError(res.error || 'Failed to load the specified game simulation.');
+      clearUrlQuery();
+    }
+  };
+
+  // Helper: Clear query parameters from address bar
+  const clearUrlQuery = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('gameId');
+    window.history.pushState(null, '', url.pathname + url.search);
+    setActiveGameId(null);
+  };
+
+  // Helper: Sync active game state back to SQLite database
+  const syncGameState = async (newState: GameState) => {
+    if (activeGameId) {
+      const res = await updateGame(activeGameId, newState);
+      if (!res.success) {
+        console.warn('Game state synchronization failed:', res.error);
+      }
+    }
+  };
+
+  // Helper: Return to menu safely, clearing active game query
+  const handleReturnToMenu = () => {
+    clearUrlQuery();
+    setGameState(null);
+    setScreen('menu');
+    loadGamesList();
+  };
+
   // Initialize CSRF and restore session cookie on mount
   React.useEffect(() => {
     const bootstrap = async () => {
@@ -83,6 +160,23 @@ export default function App() {
       const user = await checkSession();
       if (user) {
         setCurrentUser(user);
+        // Load user games
+        const gamesRes = await listGames();
+        if (gamesRes.success && gamesRes.games) {
+          setSavedGames(gamesRes.games);
+        }
+      }
+      
+      // Check query parameter for gameId
+      const params = new URLSearchParams(window.location.search);
+      const urlGameId = params.get('gameId');
+      if (urlGameId) {
+        if (user) {
+          loadGameFromId(urlGameId);
+        } else {
+          setIsAuthModalOpen(true);
+          showError('Command Link required to access this simulation. Please sign in.');
+        }
       }
     };
     bootstrap();
@@ -152,7 +246,12 @@ export default function App() {
   };
 
   // Start new game
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      showError('Command Link required to initialize new galaxy simulations. Please establish link.');
+      return;
+    }
     if (systemCount < playersSetup.length) {
       showError(`Insufficient clusters! Must have at least ${playersSetup.length} systems for this faction count.`);
       return;
@@ -163,11 +262,21 @@ export default function App() {
       numSystems: systemCount,
       players: playersSetup
     });
-    setGameState(initialized);
-    setSelectedSystemId(null);
-    setSelectedFleetId(null);
-    setTargetSystem(null);
-    setScreen('game');
+    
+    const gameName = `${gameMode === 'skirmish' ? 'Skirmish' : 'Multiplayer'} Match (${new Date().toLocaleDateString()})`;
+    const res = await createGame(gameName, initialized);
+    if (res.success && res.gameId) {
+      setActiveGameId(res.gameId);
+      window.history.pushState(null, '', `?gameId=${res.gameId}`);
+      setGameState(initialized);
+      setSelectedSystemId(null);
+      setSelectedFleetId(null);
+      setTargetSystem(null);
+      setScreen('game');
+      loadGamesList();
+    } else {
+      showError(res.error || 'Failed to save new game simulation to database.');
+    }
   };
 
   // Configure setup based on skirmish or hotseat
@@ -234,6 +343,17 @@ export default function App() {
       setCurrentUser(res.user);
       setIsAuthModalOpen(false);
       clearAuthInputs();
+      
+      // Load saved games and check URL
+      const gamesRes = await listGames();
+      if (gamesRes.success && gamesRes.games) {
+        setSavedGames(gamesRes.games);
+      }
+      const params = new URLSearchParams(window.location.search);
+      const urlGameId = params.get('gameId');
+      if (urlGameId) {
+        loadGameFromId(urlGameId);
+      }
     } else {
       setAuthError(res.message);
     }
@@ -248,6 +368,17 @@ export default function App() {
       setIsGoogleModalOpen(false);
       setIsAuthModalOpen(false);
       clearAuthInputs();
+      
+      // Load saved games and check URL
+      const gamesRes = await listGames();
+      if (gamesRes.success && gamesRes.games) {
+        setSavedGames(gamesRes.games);
+      }
+      const params = new URLSearchParams(window.location.search);
+      const urlGameId = params.get('gameId');
+      if (urlGameId) {
+        loadGameFromId(urlGameId);
+      }
     } else {
       setAuthError(res.message);
     }
@@ -256,6 +387,8 @@ export default function App() {
   const handleLogout = () => {
     logoutUser();
     setCurrentUser(null);
+    setSavedGames([]);
+    clearUrlQuery();
   };
 
   const clearAuthInputs = () => {
@@ -310,6 +443,7 @@ export default function App() {
     const res = queueShipProduction(stateCopy, activePlayer.id, selectedSystemId, shipType);
     if (res.success) {
       setGameState(stateCopy);
+      syncGameState(stateCopy);
     } else {
       showError(res.reason || 'Failed to queue ship production.');
     }
@@ -322,6 +456,7 @@ export default function App() {
     const res = upgradeSystem(stateCopy, activePlayer.id, systemId || 0, upgradeType);
     if (res.success) {
       setGameState(stateCopy);
+      syncGameState(stateCopy);
     } else {
       showError(res.reason || 'Failed to apply upgrade.');
     }
@@ -334,6 +469,7 @@ export default function App() {
     const res = dispatchFleet(stateCopy, activePlayer.id, selectedSystemId, destSysId, ships);
     if (res.success) {
       setGameState(stateCopy);
+      syncGameState(stateCopy);
       setSelectedSystemId(null);
     } else {
       showError(res.reason || 'Failed to dispatch fleet.');
@@ -347,6 +483,7 @@ export default function App() {
     const res = recallFleet(stateCopy, activePlayer.id, fleetId);
     if (res.success) {
       setGameState(stateCopy);
+      syncGameState(stateCopy);
       setSelectedFleetId(null);
     } else {
       showError(res.reason || 'Failed to cancel fleet travel.');
@@ -429,6 +566,7 @@ export default function App() {
           
           if (checkGameOver(stateCopy)) {
             setGameState(stateCopy);
+            syncGameState(stateCopy);
             setScreen('game-over');
             recordStats(stateCopy);
             return;
@@ -437,6 +575,7 @@ export default function App() {
           // If hotseat, show secrecy overlay
           if (gameMode === 'hotseat') {
             setGameState(stateCopy);
+            syncGameState(stateCopy);
             setNextHumanPlayer(nextPlayer);
             setScreen('pass-turn');
             return;
@@ -444,6 +583,7 @@ export default function App() {
 
           // In single player/skirmish against AI, we just update state and continue
           setGameState(stateCopy);
+          syncGameState(stateCopy);
           return;
         }
       }
@@ -452,12 +592,14 @@ export default function App() {
     // If we get here, only AI played or we circled back. Update state.
     if (checkGameOver(stateCopy)) {
       setGameState(stateCopy);
+      syncGameState(stateCopy);
       setScreen('game-over');
       recordStats(stateCopy);
       return;
     }
 
     setGameState(stateCopy);
+    syncGameState(stateCopy);
   };
 
   // Get winning team details
@@ -547,7 +689,8 @@ export default function App() {
           alignItems: 'center',
           gap: '24px',
           zIndex: 1,
-          position: 'relative'
+          position: 'relative',
+          padding: '20px'
         }}>
           <div style={{ textAlign: 'center' }}>
             <h1 style={{
@@ -571,31 +714,115 @@ export default function App() {
           </div>
 
           <div style={{
-            width: '450px',
-            padding: '30px',
             display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-cyan">
-            <h2 style={{ fontSize: '18px', textAlign: 'center', color: 'var(--accent-cyan)' }}>INITIALIZE SYSTEM BOOT</h2>
-            
-            <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => { handleModeChange('skirmish'); setScreen('lobby'); }}>
-              AI SKIRMISH MATCH
-            </button>
-            <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => { handleModeChange('hotseat'); setScreen('lobby'); }}>
-              LOCAL MULTIPLAYER (HOTSEAT)
-            </button>
-            
-            <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-              <strong>RULES OF ENGAGEMENT:</strong>
-              <ul style={{ paddingLeft: '20px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <li>Fog of war covers grid sectors outside sensor range.</li>
-                <li>Sensor vision is shared across teams.</li>
-                <li>Enemy ship inventories are concealed behind deflector shields.</li>
-                <li>Recall dispatched fleets mid-flight. They take the same duration to return.</li>
-              </ul>
+            gap: '24px',
+            alignItems: 'stretch',
+            flexDirection: (currentUser && savedGames.length > 0) ? 'row' : 'column',
+            justifyContent: 'center',
+            maxWidth: '1000px',
+            width: '100%'
+          }}>
+            {/* Initialize boot panel */}
+            <div style={{
+              width: '450px',
+              padding: '30px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px'
+            }} className="glass-panel glass-panel-neon-cyan">
+              <h2 style={{ fontSize: '18px', textAlign: 'center', color: 'var(--accent-cyan)' }}>INITIALIZE SYSTEM BOOT</h2>
+              
+              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => { handleModeChange('skirmish'); setScreen('lobby'); }}>
+                AI SKIRMISH MATCH
+              </button>
+              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => { handleModeChange('hotseat'); setScreen('lobby'); }}>
+                LOCAL MULTIPLAYER (HOTSEAT)
+              </button>
+              
+              <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                <strong>RULES OF ENGAGEMENT:</strong>
+                <ul style={{ paddingLeft: '20px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <li>Fog of war covers grid sectors outside sensor range.</li>
+                  <li>Sensor vision is shared across teams.</li>
+                  <li>Enemy ship inventories are concealed behind deflector shields.</li>
+                  <li>Recall dispatched fleets mid-flight. They take the same duration to return.</li>
+                </ul>
+              </div>
             </div>
+
+            {/* Saved games panel */}
+            {currentUser && savedGames.length > 0 && (
+              <div style={{
+                width: '450px',
+                padding: '30px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '20px'
+              }} className="glass-panel glass-panel-neon-magenta">
+                <h2 style={{ fontSize: '18px', textAlign: 'center', color: 'var(--accent-magenta)', fontFamily: 'Orbitron' }}>
+                  ACTIVE SAVED SIMULATIONS
+                </h2>
+                
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  maxHeight: '260px',
+                  overflowY: 'auto',
+                  paddingRight: '6px'
+                }}>
+                  {savedGames.map((game) => (
+                    <div key={game.id} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      padding: '10px 14px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 0, 127, 0.15)',
+                      transition: 'border-color 0.2s',
+                    }} className="saved-game-row">
+                      <div style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
+                        <div style={{
+                          fontSize: '13px',
+                          fontWeight: 'bold',
+                          color: 'white',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {game.name}
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }} className="telemetry">
+                          UPDATED: {new Date(game.updated_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          className="btn-sci-fi" 
+                          style={{ padding: '6px 12px', fontSize: '11px' }}
+                          onClick={() => {
+                            loadGameFromId(game.id);
+                            // Update browser URL query
+                            window.history.pushState(null, '', `?gameId=${game.id}`);
+                          }}
+                        >
+                          RESUME
+                        </button>
+                        <button 
+                          className="btn-sci-fi btn-danger" 
+                          style={{ padding: '6px 10px', fontSize: '11px', justifyContent: 'center' }}
+                          onClick={() => setGameToDelete(game)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -797,7 +1024,7 @@ export default function App() {
               <button className="btn-sci-fi" onClick={handleStartGame} style={{ flex: 1, justifyContent: 'center' }}>
                 LAUNCH GALAXY SIMULATION
               </button>
-              <button className="btn-sci-fi btn-danger" onClick={() => setScreen('menu')}>
+              <button className="btn-sci-fi btn-danger" onClick={handleReturnToMenu}>
                 RETURN
               </button>
             </div>
@@ -899,7 +1126,7 @@ export default function App() {
               The galaxy has stabilized under team authority. All hostile shipyards and fleet registries have been decommissioned or annexed.
             </p>
 
-            <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => setScreen('menu')}>
+            <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={handleReturnToMenu}>
               RETURN TO COMMAND CENTER
             </button>
           </div>
@@ -1222,6 +1449,66 @@ export default function App() {
                 onClick={() => setIsGoogleModalOpen(false)}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DECOMMISSION CONFIRMATION MODAL */}
+      {gameToDelete && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(5, 3, 13, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1001
+        }}>
+          <div style={{
+            width: '400px',
+            padding: '30px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }} className="glass-panel glass-panel-neon-magenta">
+            <h2 style={{ fontSize: '18px', color: 'var(--accent-magenta)', fontFamily: 'Orbitron', letterSpacing: '1px', textAlign: 'center' }}>
+              DECOMMISSION SIMULATION?
+            </h2>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: '1.5' }}>
+              Are you sure you want to delete the simulation record for:
+              <div style={{ color: 'white', fontWeight: 'bold', margin: '10px 0', fontSize: '14px' }}>
+                {gameToDelete.name}
+              </div>
+              This action is irreversible. All ship registries, star grid data, and fleets will be decommissioned.
+            </div>
+            <div style={{ display: 'flex', gap: '15px' }}>
+              <button 
+                className="btn-sci-fi btn-danger" 
+                style={{ flex: 1, justifyContent: 'center' }} 
+                onClick={async () => {
+                  const delRes = await deleteGame(gameToDelete.id);
+                  if (delRes.success) {
+                    loadGamesList();
+                  } else {
+                    showError(delRes.error || 'Failed to delete game.');
+                  }
+                  setGameToDelete(null);
+                }}
+              >
+                DECOMMISSION
+              </button>
+              <button 
+                className="btn-sci-fi" 
+                style={{ flex: 1, justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }} 
+                onClick={() => setGameToDelete(null)}
+              >
+                CANCEL
               </button>
             </div>
           </div>
