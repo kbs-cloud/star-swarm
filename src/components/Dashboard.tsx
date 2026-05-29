@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameState, StarSystem, Fleet, SHIP_TYPES, UPGRADES, FACTION_INFO } from '../game/gameState';
+import { GameState, StarSystem, Fleet, SHIP_TYPES, UPGRADES } from '../game/gameState';
 
 interface DashboardProps {
   gameState: GameState;
@@ -99,8 +99,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {gameState.combatLog.map((log, idx) => {
           if (log.type === 'battle' && log.results) {
             const r = log.results;
-            const attackerColor = FACTION_INFO[r.attackerId]?.color;
-            const defenderColor = FACTION_INFO[r.defenderId]?.color;
+            const attackerColor = gameState.playerState[r.attackerId]?.color || '#ffffff';
+            const defenderColor = gameState.playerState[r.defenderId]?.color || '#ffffff';
             const isWinnerAttacker = r.winner === r.attackerId;
             const systemName = log.systemName;
 
@@ -164,7 +164,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           }
 
           if (log.type === 'merge') {
-            const faction = FACTION_INFO[log.playerId || 0];
+            const faction = gameState.playerState[log.playerId || 0] || { name: 'Neutral / Independent', color: '#8ba2b5' };
             return (
               <div key={idx} style={{
                 background: 'rgba(0, 240, 255, 0.03)',
@@ -225,7 +225,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 width: '10px',
                 height: '10px',
                 borderRadius: '50%',
-                background: FACTION_INFO[activePlayerId]?.color,
+                background: activePlayer.color || '#ffffff',
                 display: 'inline-block'
               }} />
               {activePlayer.name}
@@ -291,8 +291,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                 Coordinates: <span className="telemetry">{selectedSystem.x} LY, {selectedSystem.y} LY</span>
               </div>
-              <div style={{ fontSize: '13px', marginTop: '6px', color: FACTION_INFO[selectedSystem.owner]?.color }}>
-                Owner: <strong>{FACTION_INFO[selectedSystem.owner]?.name}</strong>
+              <div style={{ fontSize: '13px', marginTop: '6px', color: selectedSystem.owner === 0 ? '#8ba2b5' : (gameState.playerState[selectedSystem.owner]?.color || '#ffffff') }}>
+                Owner: <strong>{selectedSystem.owner === 0 ? 'Neutral / Independent' : (gameState.playerState[selectedSystem.owner]?.name || 'Unknown')}</strong>
               </div>
               {selectedSystem.owner !== 0 && (
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -464,7 +464,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <h2 className="text-neon-yellow" style={{ fontSize: '20px', margin: '4px 0' }}>Swarms Sector {Math.round(selectedFleet.currentPos.x)}, {Math.round(selectedFleet.currentPos.y)}</h2>
             
             <div style={{ marginTop: '8px', fontSize: '13px' }}>
-              Owner: <strong style={{ color: FACTION_INFO[selectedFleet.owner]?.color }}>{FACTION_INFO[selectedFleet.owner]?.name}</strong>
+              Owner: <strong style={{ color: gameState.playerState[selectedFleet.owner]?.color || '#ffffff' }}>{gameState.playerState[selectedFleet.owner]?.name || 'Unknown'}</strong>
             </div>
 
             <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />

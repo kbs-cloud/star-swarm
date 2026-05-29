@@ -6,6 +6,9 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
 
 - **Interactive Canvas Star Map**: Smooth mouse/trackpad panning and mouse wheel zoom, featuring vector travel tracking lines, sensor range rings, and fog of war.
 - **Deep Economic & Production Systems**: Manage shipyards, queue ships (Fighters, Corvettes, Destroyers, Cruisers), upgrade systems, and customize production clusters.
+- **Flexible Setup Lobby**: Configure 2 to 8 players, customize names and teams, and choose between Human or AI controllers with smart map parameter recommendations.
+- **Persistent User Accounts**: Secure server-side registration and authentication via SQLite database storage and password hashing.
+- **Integrated Google Sign-in**: Simulated OAuth account selector that links Gmail accounts automatically and tracks career victory telemetry.
 - **Secrecy Gate for Hotseat Multiplayer**: Screen lockdown and secrecy gates that hide sensor layouts and system statistics between turns to prevent screen-peeping during hotseat matches.
 - **Simulated AI Factions**: Automated skirmish opponents with intelligent expansion, system upgrades, and tactical fleet dispatches.
 - **Sci-Fi Glassmorphic UI**: Premium retro-futuristic telemetry panels, real-time alerts, system dashboards, and diagnostic logs built with outfit typography.
@@ -15,9 +18,12 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
 
 ## Tech Stack & Architecture
 
-- **Core**: React, TypeScript, HTML5 Canvas, and custom modern CSS styling.
+- **Frontend**: React, TypeScript, HTML5 Canvas, and custom modern CSS styling.
+- **Backend API**: Node.js Express server running concurrently on `127.0.0.1:3001`.
+- **Database**: SQLite database (`starswarm.db`) managing persistent accounts and session linkage.
+- **Security**: Server-side `bcryptjs` password encryption and double-submit CSRF cookie checks.
 - **Icons**: Lucide React.
-- **Build Tool**: Vite.
+- **Build Tool**: Vite with local development proxying and isolated cache caching.
 - **Port Customization**: Configured to listen on custom ports via the `PORT` environment variable (default: `8080`).
 
 ---

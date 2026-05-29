@@ -80,6 +80,7 @@ export interface Player {
   type: 'human' | 'ai';
   team: number;
   name: string;
+  color?: string;
 }
 
 export interface PlayerState {
@@ -93,6 +94,7 @@ export interface PlayerState {
     [key: string]: number;
   };
   lost: boolean;
+  color?: string;
 }
 
 export interface CombatRound {
@@ -209,7 +211,11 @@ export const FACTION_INFO: Record<number, { name: string; color: string; team: n
   1: { name: 'Vanguard Swarm', color: '#00f0ff', team: 1 },
   2: { name: 'Nebula Collective', color: '#ff007f', team: 2 },
   3: { name: 'Solar Apex', color: '#ffaa00', team: 3 },
-  4: { name: 'Void Keepers', color: '#39ff14', team: 4 }
+  4: { name: 'Void Keepers', color: '#39ff14', team: 4 },
+  5: { name: 'Astral Syndicate', color: '#b026ff', team: 1 },
+  6: { name: 'Crimson Alliance', color: '#ff2a2a', team: 2 },
+  7: { name: 'Zenith Coalition', color: '#e1b12c', team: 3 },
+  8: { name: 'Quantum Union', color: '#00a8ff', team: 4 }
 };
 
 const STAR_NAMES = [
@@ -275,13 +281,22 @@ export function initializeGame(options: {
     });
   }
 
+  const processedPlayers: Player[] = players.map(p => {
+    const factionDefault = FACTION_INFO[p.id] || { color: '#ffffff', name: p.name, team: p.team };
+    return {
+      ...p,
+      color: p.color || factionDefault.color,
+      team: p.team !== undefined ? p.team : factionDefault.team
+    };
+  });
+
   const systemIndices = Array.from({ length: systems.length }, (_, i) => i);
   for (let i = systemIndices.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [systemIndices[i], systemIndices[j]] = [systemIndices[j], systemIndices[i]];
   }
 
-  players.forEach((player, idx) => {
+  processedPlayers.forEach((player, idx) => {
     const sysIdx = systemIndices[idx % systemIndices.length];
     const startingSys = systems[sysIdx];
     startingSys.owner = player.id;
@@ -299,7 +314,7 @@ export function initializeGame(options: {
   });
 
   const playerState: Record<number, PlayerState> = {};
-  players.forEach(p => {
+  processedPlayers.forEach(p => {
     playerState[p.id] = {
       id: p.id,
       name: p.name,
@@ -309,7 +324,8 @@ export function initializeGame(options: {
       tech: {
         Hyperdrive: 0
       },
-      lost: false
+      lost: false,
+      color: p.color
     };
   });
 
@@ -318,7 +334,7 @@ export function initializeGame(options: {
     gridHeight: height,
     systems,
     fleets: [],
-    players,
+    players: processedPlayers,
     playerState,
     turnNumber: 1,
     activePlayerIdx: 0,

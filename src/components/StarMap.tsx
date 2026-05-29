@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { GameState, StarSystem, Fleet, FACTION_INFO, computeVision } from '../game/gameState';
+import { GameState, StarSystem, Fleet, computeVision } from '../game/gameState';
 
 interface StarMapProps {
   gameState: GameState;
@@ -155,7 +155,7 @@ export const StarMap: React.FC<StarMapProps> = ({
         const isFleetVisible = vision.fleets.has(fleet.id);
         if (!isFleetVisible) return;
 
-        const ownerColor = FACTION_INFO[fleet.owner]?.color || '#8ba2b5';
+        const ownerColor = gameState.playerState[fleet.owner]?.color || '#8ba2b5';
         const startX = fleet.isRecalling ? fleet.source.x : (gameState.systems.find(s => s.id === fleet.source.id)?.x || fleet.source.x);
         const startY = fleet.isRecalling ? fleet.source.y : (gameState.systems.find(s => s.id === fleet.source.id)?.y || fleet.source.y);
         
@@ -206,7 +206,7 @@ export const StarMap: React.FC<StarMapProps> = ({
       gameState.systems.forEach(sys => {
         const isSysVisible = vision.systems.has(sys.id);
         const sysOwner = sys.owner;
-        const ownerColor = FACTION_INFO[sysOwner]?.color || '#8ba2b5';
+        const ownerColor = gameState.playerState[sysOwner]?.color || '#8ba2b5';
         
         // Draw star core glow
         const grad = ctx.createRadialGradient(
