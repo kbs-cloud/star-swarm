@@ -297,7 +297,7 @@ export const StarMap: React.FC<StarMapProps> = ({
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    const gridPos = screenToGrid(clickX, clickY);
+
 
     // 1. Check if clicked a star system (within a radius of 15px)
     let clickedSys: StarSystem | null = null;
@@ -490,14 +490,14 @@ export const StarMap: React.FC<StarMapProps> = ({
         )}
       </div>
 
-      {/* Zoom Toolbar overlay */}
       <div style={{
         position: 'absolute',
         bottom: '20px',
         right: '20px',
         display: 'flex',
-        gap: '8px'
-      }} className="glass-panel" p="4px" style={{ padding: '6px', display: 'flex', gap: '8px' }}>
+        gap: '8px',
+        padding: '6px'
+      }} className="glass-panel">
         <button className="btn-sci-fi" onClick={handleZoomIn} style={{ padding: '6px 12px', fontSize: '12px' }}>+</button>
         <button className="btn-sci-fi" onClick={handleZoomOut} style={{ padding: '6px 12px', fontSize: '12px' }}>-</button>
         <button className="btn-sci-fi" onClick={handleResetView} style={{ padding: '6px 12px', fontSize: '12px' }}>RESET</button>

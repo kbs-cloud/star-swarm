@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameState, StarSystem, Fleet, SHIP_TYPES, UPGRADES } from '../game/gameState';
+import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player } from '../game/gameState';
 
 interface DashboardProps {
   gameState: GameState;
@@ -13,6 +13,13 @@ interface DashboardProps {
   onRecallFleet: (fleetId: string) => void;
   targetSystem: StarSystem | null;
   setTargetSystem: (sys: StarSystem | null) => void;
+  currentUserEmail: string;
+  gameOwnerEmail: string;
+  connectedPlayers: string[];
+  isPlayerLocalToClient: (player: Player) => boolean;
+  onClaimFaction: (playerId: number) => void;
+  onTogglePlayerLocal: (playerId: number) => void;
+  onAssignPlayerEmail: (playerId: number, email: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -27,10 +34,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onRecallFleet,
   targetSystem,
   setTargetSystem,
+  currentUserEmail,
+  gameOwnerEmail,
+  connectedPlayers,
+  isPlayerLocalToClient,
+  onClaimFaction,
+  onTogglePlayerLocal,
+  onAssignPlayerEmail,
 }) => {
   const activePlayer = gameState.playerState[activePlayerId];
   const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId) || null;
   const selectedFleet = gameState.fleets.find(f => f.id === selectedFleetId) || null;
+
+  const activePlayerSlot = gameState.players[gameState.activePlayerIdx];
+  const isMyTurn = activePlayerSlot && isPlayerLocalToClient(activePlayerSlot);
 
   // State for dispatch quantities
   const [dispatchQty, setDispatchQty] = useState<Record<string, number>>({
@@ -95,7 +112,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto' }}>
         {gameState.combatLog.map((log, idx) => {
           if (log.type === 'battle' && log.results) {
             const r = log.results;
@@ -633,6 +650,124 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         )}
 
+        {/* HYPERWAVE COMS PRESENCE */}
+        <div style={{ display: 'flex', flexDirection: 'column', padding: '16px', background: 'rgba(0, 240, 255, 0.03)', border: '1px solid rgba(0, 240, 255, 0.15)' }} className="glass-panel">
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>COMS STATION ACTIVE</span>
+          <h2 className="text-neon-cyan" style={{ fontSize: '15px', margin: '4px 0 10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>📡 HYPERWAVE PRESENCE</span>
+          </h2>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '180px' }}>
+            {gameState.players.map((player) => {
+              const isOnline = player.type === 'ai' || (player.assignedEmail && connectedPlayers.includes(player.assignedEmail)) || (player.id === 1 && connectedPlayers.includes(gameOwnerEmail));
+              const playerStateInfo = gameState.playerState[player.id];
+              const isOwner = gameOwnerEmail === currentUserEmail;
+              const isMe = player.assignedEmail === currentUserEmail;
+
+              return (
+                <div key={player.id} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  fontSize: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                    <div style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: player.color || '#ffffff',
+                      boxShadow: `0 0 6px ${player.color}`
+                    }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>{player.name}</span>
+                        {player.type === 'ai' && <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>[AI]</span>}
+                        {isMe && <span style={{ fontSize: '9px', color: 'var(--accent-cyan)' }}>[YOU]</span>}
+                      </div>
+                      {player.type === 'human' && (
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {player.assignedEmail || 'Unassigned Link'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* Connection status */}
+                    <span style={{
+                      fontSize: '10px',
+                      color: isOnline ? 'var(--accent-green)' : 'var(--text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <span style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: isOnline ? 'var(--accent-green)' : '#888'
+                      }} />
+                      {player.type === 'ai' ? 'AUTO' : (isOnline ? 'ONLN' : 'OFFL')}
+                    </span>
+
+                    {/* Turn Status */}
+                    {player.type === 'human' && !playerStateInfo?.lost && (
+                      <span style={{
+                        fontSize: '10px',
+                        color: player.endedTurn ? 'var(--accent-green)' : 'var(--accent-yellow)',
+                        fontFamily: 'Share Tech Mono'
+                      }}>
+                        {player.endedTurn ? 'READY' : 'WAIT'}
+                      </span>
+                    )}
+
+                    {/* Local Toggle Checkbox */}
+                    {player.type === 'human' && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!player.isLocal}
+                          disabled={!isOwner && !isMe}
+                          onChange={() => onTogglePlayerLocal(player.id)}
+                          style={{ accentColor: 'var(--accent-cyan)', margin: 0 }}
+                        />
+                        <span>LCL</span>
+                      </label>
+                    )}
+
+                    {/* Claim Button */}
+                    {player.type === 'human' && !player.assignedEmail && !isMe && (
+                      <button
+                        className="btn-sci-fi"
+                        style={{ padding: '2px 6px', fontSize: '9px', textTransform: 'uppercase' }}
+                        onClick={() => onClaimFaction(player.id)}
+                      >
+                        CLAIM
+                      </button>
+                    )}
+
+                    {/* Owner Assign Option: Clear or Assign if Owner */}
+                    {isOwner && player.type === 'human' && player.assignedEmail && player.id !== 1 && (
+                      <button
+                        className="btn-sci-fi btn-danger"
+                        style={{ padding: '2px 4px', fontSize: '9px' }}
+                        onClick={() => onAssignPlayerEmail(player.id, '')}
+                      >
+                        RESET
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* COMBAT AND INTELLIGENCE EVENTS LOG */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px' }} className="glass-panel">
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>TACTICAL REPORT LOGS</span>
@@ -640,6 +775,105 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {renderCombatLog()}
         </div>
       </div>
+
+      {/* WAITING FOR REMOTE PLAYER OVERLAY */}
+      {!isMyTurn && activePlayerSlot && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(5, 10, 20, 0.92)',
+          backdropFilter: 'blur(12px)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          pointerEvents: 'auto',
+          color: 'white',
+          fontFamily: 'Orbitron'
+        }}>
+          <div style={{
+            width: '500px',
+            padding: '40px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '24px',
+            textAlign: 'center'
+          }} className="glass-panel glass-panel-neon-magenta pulse-light">
+            <div style={{ fontSize: '48px' }}>📡</div>
+            <h2 style={{ fontSize: '24px', color: 'var(--accent-magenta)', letterSpacing: '2px', margin: 0 }}>
+              HYPERWAVE SYNC ACTIVE
+            </h2>
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+              We are currently awaiting tactical data submissions from:
+              <div style={{
+                fontSize: '22px',
+                fontWeight: 'bold',
+                color: activePlayerSlot.color || 'white',
+                marginTop: '10px',
+                textShadow: `0 0 10px ${activePlayerSlot.color || '#fff'}`
+              }}>
+                {activePlayerSlot.name}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                ({activePlayerSlot.assignedEmail || 'Unassigned Link'})
+              </div>
+            </div>
+
+            <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                COMMAND STATUS ARRAY
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {gameState.players.map(p => {
+                  if (p.type !== 'human') return null;
+                  const pState = gameState.playerState[p.id];
+                  if (pState?.lost) return null;
+                  
+                  const isOnline = (p.assignedEmail && connectedPlayers.includes(p.assignedEmail)) || (p.id === 1 && connectedPlayers.includes(gameOwnerEmail));
+                  return (
+                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ color: p.color || 'white', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: p.color }} />
+                        {p.name}
+                      </span>
+                      <span className="telemetry" style={{ color: p.endedTurn ? 'var(--accent-green)' : 'var(--accent-yellow)' }}>
+                        {p.endedTurn ? '✓ SUBMITTED' : (isOnline ? '⚡ TRANSMITTING...' : '🔴 OFFLINE')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Owner action: can force player to local to take turn for them */}
+            {gameOwnerEmail === currentUserEmail && (
+              <div style={{ marginTop: '10px' }}>
+                <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)', marginBottom: '15px' }} />
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                  GAME OWNER DIRECTIVES
+                </div>
+                <button
+                  className="btn-sci-fi"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={() => onTogglePlayerLocal(activePlayerSlot.id)}
+                >
+                  FORCE LOCAL CONTROL (TAKE OVER TURN)
+                </button>
+              </div>
+            )}
+            
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }} className="telemetry animate-pulse">
+              [COMM CODES SYNCING IN BACKGROUND...]
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

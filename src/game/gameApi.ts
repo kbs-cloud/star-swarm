@@ -67,14 +67,14 @@ export async function createGame(name: string, gameState: GameState): Promise<{ 
 /**
  * Retrieves a specific game simulation and its full state.
  */
-export async function getGame(id: string): Promise<{ success: boolean; game?: GameDetails; error?: string }> {
+export async function getGame(id: string): Promise<{ success: boolean; game?: GameDetails; connectedPlayers?: string[]; error?: string }> {
   try {
     const response = await fetch(`/api/games/${id}`, {
       headers: getHeaders()
     });
     const data = await response.json();
     if (response.ok && data.success) {
-      return { success: true, game: data.game };
+      return { success: true, game: data.game, connectedPlayers: data.connectedPlayers };
     }
     return { success: false, error: data.error || 'Failed to load game session.' };
   } catch (e) {
@@ -83,9 +83,28 @@ export async function getGame(id: string): Promise<{ success: boolean; game?: Ga
 }
 
 /**
+ * Sends a presence heartbeat to the server and returns active commanders.
+ */
+export async function sendHeartbeat(id: string): Promise<{ success: boolean; connectedPlayers?: string[]; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${id}/presence`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true, connectedPlayers: data.connectedPlayers };
+    }
+    return { success: false, error: data.error || 'Heartbeat update failed.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+/**
  * Syncs the active game state to the database.
  */
-export async function updateGame(id: string, gameState: GameState): Promise<{ success: boolean; error?: string }> {
+export async function updateGame(id: string, gameState: GameState): Promise<{ success: boolean; connectedPlayers?: string[]; error?: string }> {
   try {
     const response = await fetch(`/api/games/${id}`, {
       method: 'PUT',
@@ -94,7 +113,7 @@ export async function updateGame(id: string, gameState: GameState): Promise<{ su
     });
     const data = await response.json();
     if (response.ok && data.success) {
-      return { success: true };
+      return { success: true, connectedPlayers: data.connectedPlayers };
     }
     return { success: false, error: data.error || 'Failed to save game state.' };
   } catch (e) {

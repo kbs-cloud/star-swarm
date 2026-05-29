@@ -32,10 +32,8 @@ test.describe('Star-Swarm E2E Tests', () => {
     await expect(gameHeading).toBeVisible();
 
     // Verify Menu buttons are visible
-    const skirmishBtn = page.locator('button:has-text("AI SKIRMISH MATCH")');
-    const hotseatBtn = page.locator('button:has-text("LOCAL MULTIPLAYER (HOTSEAT)")');
+    const skirmishBtn = page.locator('button:has-text("SKIRMISH MATCH")');
     await expect(skirmishBtn).toBeVisible();
-    await expect(hotseatBtn).toBeVisible();
 
     // 2. Open auth modal and register a new commander account
     const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');

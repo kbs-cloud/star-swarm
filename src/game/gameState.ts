@@ -81,6 +81,9 @@ export interface Player {
   team: number;
   name: string;
   color?: string;
+  isLocal?: boolean;
+  assignedEmail?: string | null;
+  endedTurn?: boolean;
 }
 
 export interface PlayerState {
@@ -236,10 +239,10 @@ export function initializeGame(options: {
   const height = options.gridHeight || 60;
   const numSystems = options.numSystems || 16;
   const players = options.players || [
-    { id: 1, type: 'human', team: 1, name: 'Vanguard (You)' },
-    { id: 2, type: 'ai', team: 2, name: 'Nebula AI' },
-    { id: 3, type: 'ai', team: 3, name: 'Solar AI' },
-    { id: 4, type: 'ai', team: 4, name: 'Void AI' }
+    { id: 1, type: 'human', team: 1, name: 'Vanguard (You)', isLocal: true, assignedEmail: null, endedTurn: false },
+    { id: 2, type: 'ai', team: 2, name: 'Nebula AI', isLocal: false, assignedEmail: null, endedTurn: false },
+    { id: 3, type: 'ai', team: 3, name: 'Solar AI', isLocal: false, assignedEmail: null, endedTurn: false },
+    { id: 4, type: 'ai', team: 4, name: 'Void AI', isLocal: false, assignedEmail: null, endedTurn: false }
   ];
 
   const systems: StarSystem[] = [];
@@ -286,7 +289,10 @@ export function initializeGame(options: {
     return {
       ...p,
       color: p.color || factionDefault.color,
-      team: p.team !== undefined ? p.team : factionDefault.team
+      team: p.team !== undefined ? p.team : factionDefault.team,
+      isLocal: p.isLocal !== undefined ? p.isLocal : (p.type === 'human'),
+      assignedEmail: p.assignedEmail || null,
+      endedTurn: p.endedTurn || false
     };
   });
 

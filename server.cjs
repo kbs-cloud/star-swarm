@@ -133,6 +133,34 @@ function getSessionUser(req, callback) {
   );
 }
 
+// In-memory presence store
+// Key: gameId, Value: Array of { email, lastSeen }
+const gamePresence = new Map();
+
+function updatePresence(gameId, email) {
+  if (!gamePresence.has(gameId)) {
+    gamePresence.set(gameId, []);
+  }
+  const list = gamePresence.get(gameId);
+  const now = Date.now();
+  const existing = list.find(item => item.email === email);
+  if (existing) {
+    existing.lastSeen = now;
+  } else {
+    list.push({ email, lastSeen: now });
+  }
+  // Clean up old ones (> 10 seconds)
+  const freshList = list.filter(item => now - item.lastSeen < 10000);
+  gamePresence.set(gameId, freshList);
+}
+
+function getPresence(gameId) {
+  const list = gamePresence.get(gameId) || [];
+  const now = Date.now();
+  return list.filter(item => now - item.lastSeen < 10000).map(item => item.email);
+}
+
+
 // Endpoint: Register new user
 app.post('/api/register', validateCSRF, (req, res) => {
   const { email, password } = req.body;
@@ -435,8 +463,12 @@ app.get('/api/games/:id', (req, res) => {
           return res.status(500).json({ error: 'Game state corruption detected.' });
         }
         
+        updatePresence(gameId, user.email);
+        const connected = getPresence(gameId);
+
         res.status(200).json({
           success: true,
+          connectedPlayers: connected,
           game: {
             id: row.id,
             ownerEmail: row.owner_email,
@@ -450,6 +482,7 @@ app.get('/api/games/:id', (req, res) => {
     );
   });
 });
+
 
 // Endpoint: Update an existing game state by ID
 app.put('/api/games/:id', validateCSRF, (req, res) => {
@@ -481,9 +514,29 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
             console.error('Error updating game:', updateErr.message);
             return res.status(500).json({ error: 'Failed to update game state.' });
           }
-          res.status(200).json({ success: true, message: 'Game state updated successfully.' });
+          updatePresence(gameId, user.email);
+          res.status(200).json({
+            success: true,
+            connectedPlayers: getPresence(gameId),
+            message: 'Game state updated successfully.'
+          });
         }
       );
+    });
+  });
+});
+
+// Endpoint: Heartbeat/Presence update
+app.post('/api/games/:id/presence', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized.' });
+    }
+    const gameId = req.params.id;
+    updatePresence(gameId, user.email);
+    res.status(200).json({
+      success: true,
+      connectedPlayers: getPresence(gameId)
     });
   });
 });

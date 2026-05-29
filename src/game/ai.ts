@@ -1,5 +1,5 @@
 // Star-Swarm AI Decision Engine (TypeScript)
-import { GameState, StarSystem, dispatchFleet, upgradeSystem, queueShipProduction, SHIP_TYPES } from './gameState';
+import { GameState, dispatchFleet, upgradeSystem, queueShipProduction } from './gameState';
 
 /**
  * Executes a turn for an AI player.

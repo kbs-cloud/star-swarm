@@ -160,7 +160,7 @@ export async function logoutUser(): Promise<void> {
 /**
  * Updates win/loss telemetry stats on the server.
  */
-export async function recordGameStats(email: string, won: boolean): Promise<void> {
+export async function recordGameStats(_email: string, won: boolean): Promise<void> {
   try {
     const response = await fetch('/api/stats', {
       method: 'POST',

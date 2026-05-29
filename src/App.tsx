@@ -8,7 +8,8 @@ import {
   queueShipProduction,
   GameState,
   StarSystem,
-  FACTION_INFO
+  FACTION_INFO,
+  Player
 } from './game/gameState';
 import { runAITurn } from './game/ai';
 import { StarMap } from './components/StarMap';
@@ -41,6 +42,9 @@ interface PlayerSetup {
   type: 'human' | 'ai';
   team: number;
   color?: string;
+  isLocal?: boolean;
+  assignedEmail?: string | null;
+  endedTurn?: boolean;
 }
 
 export default function App() {
@@ -52,15 +56,19 @@ export default function App() {
   // Persistent Database Game States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [savedGames, setSavedGames] = useState<GameMetadata[]>([]);
-  const [isLoadingGame, setIsLoadingGame] = useState(false);
+  const [_, setIsLoadingGame] = useState(false);
   const [gameToDelete, setGameToDelete] = useState<GameMetadata | null>(null);
+
+  // Connected Players & Game Owner Email
+  const [connectedPlayers, setConnectedPlayers] = useState<string[]>([]);
+  const [gameOwnerEmail, setGameOwnerEmail] = useState<string | null>(null);
 
   // Players configuration setup
   const [playersSetup, setPlayersSetup] = useState<PlayerSetup[]>([
-    { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff' },
-    { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f' },
-    { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00' },
-    { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14' }
+    { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff', isLocal: true, assignedEmail: null, endedTurn: false },
+    { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false },
+    { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false },
+    { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false }
   ]);
 
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -98,6 +106,20 @@ export default function App() {
     }
   };
 
+  // Helper to determine if a player is local to this client session
+  const isPlayerLocalToClient = (player: PlayerSetup | Player): boolean => {
+    if (!currentUser) return false;
+    // If the player is assigned to the current user's email, they are local.
+    if (player.assignedEmail === currentUser.email) {
+      return true;
+    }
+    // If it's marked as local in the game state, AND the current user is the game owner, they are local (for hotseat play).
+    if (player.isLocal && gameOwnerEmail === currentUser.email) {
+      return true;
+    }
+    return false;
+  };
+
   // Helper: Fetch and load game by ID
   const loadGameFromId = async (id: string) => {
     setIsLoadingGame(true);
@@ -106,6 +128,8 @@ export default function App() {
     if (res.success && res.game) {
       setGameState(res.game.gameState);
       setActiveGameId(res.game.id);
+      setGameOwnerEmail(res.game.ownerEmail);
+      setConnectedPlayers(res.connectedPlayers || []);
       
       // Determine gameMode (skirmish vs hotseat) from players
       const hasMultipleHumans = res.game.gameState.players.filter(p => p.type === 'human').length > 1;
@@ -117,7 +141,10 @@ export default function App() {
         name: p.name,
         type: p.type,
         team: p.team,
-        color: p.color
+        color: p.color,
+        isLocal: p.isLocal,
+        assignedEmail: p.assignedEmail,
+        endedTurn: p.endedTurn
       }));
       setPlayersSetup(setup);
       setScreen('game');
@@ -182,6 +209,49 @@ export default function App() {
     bootstrap();
   }, []);
 
+  // Periodic polling loop for game state & presence updates
+  React.useEffect(() => {
+    if (!activeGameId || screen !== 'game') return;
+
+    let isSubscribed = true;
+    const poll = async () => {
+      const res = await getGame(activeGameId);
+      if (!isSubscribed) return;
+
+      if (res.success && res.game) {
+        setConnectedPlayers(res.connectedPlayers || []);
+        
+        const serverState = res.game.gameState;
+        setGameState(prev => {
+          if (!prev) return serverState;
+
+          const isTurnChanged = serverState.turnNumber !== prev.turnNumber || serverState.activePlayerIdx !== prev.activePlayerIdx;
+          const activePlayerOnServer = serverState.players[serverState.activePlayerIdx];
+          const isRemoteActive = activePlayerOnServer && !isPlayerLocalToClient(activePlayerOnServer);
+          
+          const isStateDifferent = JSON.stringify(serverState.fleets) !== JSON.stringify(prev.fleets) ||
+                                  JSON.stringify(serverState.playerState) !== JSON.stringify(prev.playerState) ||
+                                  JSON.stringify(serverState.systems.map(s => ({ owner: s.owner, ships: s.ships, queue: s.buildQueue }))) !== 
+                                  JSON.stringify(prev.systems.map(s => ({ owner: s.owner, ships: s.ships, queue: s.buildQueue }))) ||
+                                  JSON.stringify(serverState.players) !== JSON.stringify(prev.players);
+
+          if (isTurnChanged || isRemoteActive || isStateDifferent) {
+            return serverState;
+          }
+          return prev;
+        });
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 3000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [activeGameId, screen, currentUser, gameOwnerEmail]);
+
   // Recommendations mapping
   const getRecommendationsForPlayerCount = (count: number) => {
     switch (count) {
@@ -212,10 +282,13 @@ export default function App() {
     
     const newPlayer: PlayerSetup = {
       id: nextId,
-      name: gameMode === 'skirmish' ? factionDefaults.name + ' AI' : `Admiral ${String.fromCharCode(64 + nextId)}`,
-      type: gameMode === 'skirmish' ? 'ai' : 'human',
+      name: `Admiral ${String.fromCharCode(64 + nextId)}`,
+      type: 'human',
       team: factionDefaults.team,
-      color: factionDefaults.color
+      color: factionDefaults.color,
+      isLocal: true,
+      assignedEmail: '',
+      endedTurn: false
     };
     
     const newSetup = [...playersSetup, newPlayer];
@@ -234,9 +307,9 @@ export default function App() {
         ...p,
         id: newId,
         name: p.name.startsWith('Admiral ') || p.name.includes(' AI') || p.name.includes('You')
-          ? (gameMode === 'skirmish' 
-              ? (newId === 1 ? 'Vanguard (You)' : `${factionDefaults.name.split(' ')[0]} AI`)
-              : `Admiral ${String.fromCharCode(64 + newId)}`)
+          ? (newId === 1 
+              ? 'Vanguard (You)' 
+              : (p.type === 'ai' ? `${factionDefaults.name.split(' ')[0]} AI` : `Admiral ${String.fromCharCode(64 + newId)}`))
           : p.name,
         color: factionDefaults.color
       };
@@ -256,17 +329,25 @@ export default function App() {
       showError(`Insufficient clusters! Must have at least ${playersSetup.length} systems for this faction count.`);
       return;
     }
+
+    const updatedSetup = [...playersSetup];
+    if (updatedSetup[0]) {
+      updatedSetup[0].assignedEmail = currentUser.email;
+      updatedSetup[0].isLocal = true;
+    }
+
     const initialized = initializeGame({
       gridWidth: gridSize,
       gridHeight: gridSize,
       numSystems: systemCount,
-      players: playersSetup
+      players: updatedSetup
     });
     
-    const gameName = `${gameMode === 'skirmish' ? 'Skirmish' : 'Multiplayer'} Match (${new Date().toLocaleDateString()})`;
+    const gameName = `Skirmish Match (${new Date().toLocaleDateString()})`;
     const res = await createGame(gameName, initialized);
     if (res.success && res.gameId) {
       setActiveGameId(res.gameId);
+      setGameOwnerEmail(currentUser.email);
       window.history.pushState(null, '', `?gameId=${res.gameId}`);
       setGameState(initialized);
       setSelectedSystemId(null);
@@ -279,27 +360,20 @@ export default function App() {
     }
   };
 
-  // Configure setup based on skirmish or hotseat
-  const handleModeChange = (mode: 'skirmish' | 'hotseat') => {
-    setGameMode(mode);
-    let newSetup: PlayerSetup[] = [];
-    if (mode === 'skirmish') {
-      newSetup = [
-        { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff' },
-        { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f' },
-        { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00' },
-        { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14' }
-      ];
-    } else {
-      newSetup = [
-        { id: 1, name: 'Admiral Alpha', type: 'human', team: 1, color: '#00f0ff' },
-        { id: 2, name: 'Admiral Beta', type: 'human', team: 2, color: '#ff007f' },
-        { id: 3, name: 'Nebula AI', type: 'ai', team: 3, color: '#ffaa00' },
-        { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14' }
-      ];
-    }
+  // Initialize unified Skirmish Match Lobby
+  const handleStartSkirmishLobby = () => {
+    const ownerEmail = currentUser?.email || '';
+    const newSetup: PlayerSetup[] = [
+      { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff', isLocal: true, assignedEmail: ownerEmail, endedTurn: false },
+      { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false },
+      { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false },
+      { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false }
+    ];
     setPlayersSetup(newSetup);
+    setGameMode('skirmish');
+    setGameOwnerEmail(ownerEmail);
     applyRecommendations(newSetup.length);
+    setScreen('lobby');
   };
 
   // Adjust player setup
@@ -536,60 +610,50 @@ export default function App() {
     setSelectedFleetId(null);
     setTargetSystem(null);
 
-    // Get next player
-    let nextIdx = stateCopy.activePlayerIdx;
-    let fullRoundCompleted = false;
+    // Mark current player as ended their turn
+    const activePlayer = stateCopy.players[stateCopy.activePlayerIdx];
+    if (activePlayer) {
+      activePlayer.endedTurn = true;
+    }
 
-    do {
-      nextIdx = (nextIdx + 1) % stateCopy.players.length;
-      if (nextIdx === 0) {
-        fullRoundCompleted = true;
+    // Check if all active human players have ended their turn
+    const activeHumans = stateCopy.players.filter(p => p.type === 'human' && !stateCopy.playerState[p.id].lost);
+    const allEnded = activeHumans.every(p => p.endedTurn);
+
+    if (allEnded) {
+      // 1. Process turn end (fleets move, battles resolve, income collected)
+      processTurnEnd(stateCopy);
+
+      // 2. Run AI turns for any remaining active AIs
+      stateCopy.players.forEach(p => {
+        if (p.type === 'ai' && !stateCopy.playerState[p.id].lost) {
+          runAITurn(stateCopy, p.id);
+        }
+      });
+
+      // 3. Reset turn ended flag for all players
+      stateCopy.players.forEach(p => {
+        p.endedTurn = false;
+      });
+
+      // 4. Set active player back to the first active human player
+      const firstActiveHuman = stateCopy.players.find(p => p.type === 'human' && !stateCopy.playerState[p.id].lost);
+      if (firstActiveHuman) {
+        stateCopy.activePlayerIdx = stateCopy.players.indexOf(firstActiveHuman);
       }
-
-      // If full round completed, run processTurnEnd (moves fleets, resolves battle, income)
-      if (fullRoundCompleted) {
-        processTurnEnd(stateCopy);
-        fullRoundCompleted = false; // reset for multi-round AI skips
-      }
-
-      const nextPlayer = stateCopy.players[nextIdx];
-      const pState = stateCopy.playerState[nextPlayer.id];
-
-      // If player is not lost, check type
-      if (!pState.lost) {
-        if (nextPlayer.type === 'ai') {
-          // Simulate AI Actions immediately
-          runAITurn(stateCopy, nextPlayer.id);
-        } else {
-          // It's a Human Player's Turn!
+    } else {
+      // Transition activePlayerIdx to the next active player who hasn't ended their turn
+      let nextIdx = stateCopy.activePlayerIdx;
+      for (let i = 0; i < stateCopy.players.length; i++) {
+        nextIdx = (nextIdx + 1) % stateCopy.players.length;
+        const p = stateCopy.players[nextIdx];
+        if (p.type === 'human' && !stateCopy.playerState[p.id].lost && !p.endedTurn) {
           stateCopy.activePlayerIdx = nextIdx;
-          
-          if (checkGameOver(stateCopy)) {
-            setGameState(stateCopy);
-            syncGameState(stateCopy);
-            setScreen('game-over');
-            recordStats(stateCopy);
-            return;
-          }
-
-          // If hotseat, show secrecy overlay
-          if (gameMode === 'hotseat') {
-            setGameState(stateCopy);
-            syncGameState(stateCopy);
-            setNextHumanPlayer(nextPlayer);
-            setScreen('pass-turn');
-            return;
-          }
-
-          // In single player/skirmish against AI, we just update state and continue
-          setGameState(stateCopy);
-          syncGameState(stateCopy);
-          return;
+          break;
         }
       }
-    } while (nextIdx !== stateCopy.activePlayerIdx);
+    }
 
-    // If we get here, only AI played or we circled back. Update state.
     if (checkGameOver(stateCopy)) {
       setGameState(stateCopy);
       syncGameState(stateCopy);
@@ -598,8 +662,64 @@ export default function App() {
       return;
     }
 
+    // Check if we should display the pass-turn secrecy overlay
+    const nextPlayer = stateCopy.players[stateCopy.activePlayerIdx];
+    const isNextLocal = isPlayerLocalToClient(nextPlayer);
+    const localHumansCount = stateCopy.players.filter(
+      p => p.type === 'human' && !stateCopy.playerState[p.id].lost && isPlayerLocalToClient(p)
+    ).length;
+
+    if (isNextLocal && localHumansCount > 1) {
+      setGameState(stateCopy);
+      syncGameState(stateCopy);
+      setNextHumanPlayer(nextPlayer);
+      setScreen('pass-turn');
+      return;
+    }
+
     setGameState(stateCopy);
     syncGameState(stateCopy);
+  };
+
+  // Faction control operations
+  const handleClaimFaction = (playerId: number) => {
+    if (!gameState || !currentUser) return;
+    const stateCopy = { ...gameState };
+    const player = stateCopy.players.find(p => p.id === playerId);
+    if (player && player.type === 'human') {
+      player.assignedEmail = currentUser.email;
+      player.isLocal = true;
+      setGameState(stateCopy);
+      syncGameState(stateCopy);
+    }
+  };
+
+  const handleTogglePlayerLocal = (playerId: number) => {
+    if (!gameState || !currentUser) return;
+    const stateCopy = { ...gameState };
+    const player = stateCopy.players.find(p => p.id === playerId);
+    if (player && player.type === 'human') {
+      const isOwner = gameOwnerEmail === currentUser.email;
+      const isMe = player.assignedEmail === currentUser.email;
+      if (isOwner || isMe) {
+        player.isLocal = !player.isLocal;
+        setGameState(stateCopy);
+        syncGameState(stateCopy);
+      }
+    }
+  };
+
+  const handleAssignPlayerEmail = (playerId: number, email: string) => {
+    if (!gameState || !currentUser) return;
+    const stateCopy = { ...gameState };
+    const player = stateCopy.players.find(p => p.id === playerId);
+    if (player && player.type === 'human') {
+      if (gameOwnerEmail === currentUser.email) {
+        player.assignedEmail = email.trim() || null;
+        setGameState(stateCopy);
+        syncGameState(stateCopy);
+      }
+    }
   };
 
   // Get winning team details
@@ -716,7 +836,7 @@ export default function App() {
           <div style={{
             display: 'flex',
             gap: '24px',
-            alignItems: 'stretch',
+            alignItems: (currentUser && savedGames.length > 0) ? 'stretch' : 'center',
             flexDirection: (currentUser && savedGames.length > 0) ? 'row' : 'column',
             justifyContent: 'center',
             maxWidth: '1000px',
@@ -732,11 +852,8 @@ export default function App() {
             }} className="glass-panel glass-panel-neon-cyan">
               <h2 style={{ fontSize: '18px', textAlign: 'center', color: 'var(--accent-cyan)' }}>INITIALIZE SYSTEM BOOT</h2>
               
-              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => { handleModeChange('skirmish'); setScreen('lobby'); }}>
-                AI SKIRMISH MATCH
-              </button>
-              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => { handleModeChange('hotseat'); setScreen('lobby'); }}>
-                LOCAL MULTIPLAYER (HOTSEAT)
+              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={handleStartSkirmishLobby}>
+                SKIRMISH MATCH
               </button>
               
               <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
@@ -907,15 +1024,14 @@ export default function App() {
                   FACTIONS IN SYSTEM: {playersSetup.length} / 8
                 </span>
               </div>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
+                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
                 {playersSetup.map((player, idx) => {
                   const factionColor = player.color || FACTION_INFO[player.id]?.color || '#ffffff';
                   return (
                     <div key={player.id} style={{
                       display: 'grid',
-                      gridTemplateColumns: '30px 1.5fr 1fr 1fr 40px',
-                      gap: '10px',
+                      gridTemplateColumns: '24px 1.5fr 1fr 1fr 90px 2fr 32px',
+                      gap: '8px',
                       alignItems: 'center',
                       background: 'rgba(255,255,255,0.02)',
                       padding: '8px 12px',
@@ -950,7 +1066,19 @@ export default function App() {
                       {/* Controller selector */}
                       <select
                         value={player.type}
-                        onChange={(e) => updatePlayerSetup(idx, 'type', e.target.value as 'human' | 'ai')}
+                        onChange={(e) => {
+                          const val = e.target.value as 'human' | 'ai';
+                          setPlayersSetup(prev => {
+                            const copy = [...prev];
+                            copy[idx] = {
+                              ...copy[idx],
+                              type: val,
+                              isLocal: val === 'human',
+                              assignedEmail: val === 'human' ? '' : null
+                            };
+                            return copy;
+                          });
+                        }}
                         style={{
                           background: 'rgba(0,0,0,0.8)',
                           border: '1px solid rgba(255,255,255,0.1)',
@@ -964,7 +1092,7 @@ export default function App() {
                         <option value="human">🌐 HUMAN</option>
                         <option value="ai">🤖 AI</option>
                       </select>
-
+ 
                       {/* Team Selector */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <select
@@ -987,6 +1115,45 @@ export default function App() {
                         </select>
                       </div>
 
+                      {/* Local Playable Checkbox */}
+                      {player.type === 'human' ? (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!player.isLocal}
+                            disabled={idx === 0}
+                            onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
+                            style={{ accentColor: 'var(--accent-cyan)' }}
+                          />
+                          <span>LOCAL</span>
+                        </label>
+                      ) : (
+                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center' }}>-</div>
+                      )}
+
+                      {/* Assigned Email */}
+                      {player.type === 'human' ? (
+                        <input
+                          type="text"
+                          placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
+                          value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
+                          disabled={idx === 0}
+                          onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
+                          style={{
+                            background: 'rgba(0,0,0,0.5)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            color: 'white',
+                            padding: '6px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            width: '100%',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      ) : (
+                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center', fontFamily: 'Share Tech Mono' }}>[AI SYSTEM]</div>
+                      )}
+ 
                       {/* Remove Button */}
                       {idx > 0 && playersSetup.length > 2 ? (
                         <button
@@ -1056,6 +1223,13 @@ export default function App() {
             onRecallFleet={handleRecallFleet}
             targetSystem={targetSystem}
             setTargetSystem={setTargetSystem}
+            currentUserEmail={currentUser?.email || ""}
+            gameOwnerEmail={gameOwnerEmail || ""}
+            connectedPlayers={connectedPlayers}
+            isPlayerLocalToClient={isPlayerLocalToClient}
+            onClaimFaction={handleClaimFaction}
+            onTogglePlayerLocal={handleTogglePlayerLocal}
+            onAssignPlayerEmail={handleAssignPlayerEmail}
           />
         </div>
       )}
