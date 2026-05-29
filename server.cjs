@@ -58,6 +58,13 @@ function initializeTables() {
         FOREIGN KEY(owner_email) REFERENCES users(email) ON DELETE CASCADE
       )
     `);
+
+    // Add optional display_name column to users table dynamically if it does not exist
+    db.run("ALTER TABLE users ADD COLUMN display_name TEXT", (err) => {
+      if (err && !err.message.includes('duplicate column name')) {
+        console.warn('Optional display_name column creation info:', err.message);
+      }
+    });
   });
 }
 
@@ -119,7 +126,7 @@ function getSessionUser(req, callback) {
 
   const now = new Date().toISOString();
   db.get(
-    `SELECT s.csrf_token, u.email, u.is_google_linked, u.games_played, u.games_won 
+    `SELECT s.csrf_token, u.email, u.display_name, u.is_google_linked, u.games_played, u.games_won 
      FROM sessions s 
      JOIN users u ON s.email = u.email 
      WHERE s.id = ? AND s.expires_at > ?`,
@@ -242,6 +249,7 @@ app.post('/api/login', validateCSRF, (req, res) => {
           success: true,
           user: {
             email: user.email,
+            displayName: user.display_name || null,
             isGoogleLinked: user.is_google_linked === 1,
             stats: { gamesPlayed: user.games_played, gamesWon: user.games_won }
           }
@@ -272,7 +280,7 @@ app.post('/api/google-login', validateCSRF, (req, res) => {
       if (user.is_google_linked === 0) {
         db.run('UPDATE users SET is_google_linked = 1 WHERE email = ?', [normalizedEmail]);
       }
-      createAndSendSession(user.email, user.games_played, user.games_won, 1);
+      createAndSendSession(user.email, user.games_played, user.games_won, 1, user.display_name);
     } else {
       // User does not exist, auto-create
       db.run(
@@ -282,13 +290,13 @@ app.post('/api/google-login', validateCSRF, (req, res) => {
           if (insertErr) {
             return res.status(500).json({ error: 'Failed to auto-register Google account.' });
           }
-          createAndSendSession(normalizedEmail, 0, 0, 1);
+          createAndSendSession(normalizedEmail, 0, 0, 1, null);
         }
       );
     }
   });
 
-  function createAndSendSession(userEmail, gamesPlayed, gamesWon, isGoogleLinked) {
+  function createAndSendSession(userEmail, gamesPlayed, gamesWon, isGoogleLinked, displayName) {
     const sessionId = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     const csrfToken = req.cookies['csrf_token'] || crypto.randomBytes(24).toString('hex');
@@ -312,6 +320,7 @@ app.post('/api/google-login', validateCSRF, (req, res) => {
           success: true,
           user: {
             email: userEmail,
+            displayName: displayName || null,
             isGoogleLinked: isGoogleLinked === 1,
             stats: { gamesPlayed, gamesWon }
           }
@@ -331,10 +340,35 @@ app.get('/api/me', (req, res) => {
       success: true,
       user: {
         email: user.email,
+        displayName: user.display_name || null,
         isGoogleLinked: user.is_google_linked === 1,
         stats: { gamesPlayed: user.games_played, gamesWon: user.games_won }
       }
     });
+  });
+});
+
+// Endpoint: Update user global settings
+app.put('/api/settings', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    const { displayName } = req.body;
+    if (typeof displayName !== 'string') {
+      return res.status(400).json({ error: 'Invalid display name.' });
+    }
+    db.run(
+      'UPDATE users SET display_name = ? WHERE email = ?',
+      [displayName.trim(), user.email],
+      function (updateErr) {
+        if (updateErr) {
+          console.error('Error updating settings:', updateErr.message);
+          return res.status(500).json({ error: 'Failed to update settings.' });
+        }
+        res.status(200).json({ success: true, message: 'Settings updated successfully.' });
+      }
+    );
   });
 });
 
@@ -388,7 +422,7 @@ app.get('/api/games', (req, res) => {
       return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
     }
     db.all(
-      'SELECT id, name, created_at, updated_at FROM games WHERE owner_email = ? ORDER BY updated_at DESC',
+      'SELECT id, name, game_state, created_at, updated_at FROM games WHERE owner_email = ? ORDER BY updated_at DESC',
       [user.email],
       (queryErr, rows) => {
         if (queryErr) {

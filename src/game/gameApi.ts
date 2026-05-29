@@ -13,6 +13,7 @@ function getHeaders(): Record<string, string> {
 export interface GameMetadata {
   id: string;
   name: string;
+  game_state?: any;
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +25,26 @@ export interface GameDetails {
   gameState: GameState;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Updates user settings (e.g. global display name) on the database.
+ */
+export async function updateSettings(displayName: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ displayName })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Failed to update settings.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
 }
 
 /**

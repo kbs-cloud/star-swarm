@@ -7,6 +7,7 @@ export interface UserStats {
 
 export interface UserAccount {
   email: string;
+  displayName: string | null;
   isGoogleLinked: boolean;
   stats: UserStats;
 }

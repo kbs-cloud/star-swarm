@@ -9,6 +9,9 @@ interface DashboardProps {
   setSelectedSystemId: (id: number | null) => void;
   setSelectedFleetId: (id: string | null) => void;
   onEndTurn: () => void;
+  onReturnToMenu: () => void;
+  onRenamePlayer: (playerId: number, newName: string) => void;
+  onCancelEndTurn?: (playerId: number) => void;
   onQueueShip: (shipType: string) => void;
   onUpgradeSystem: (upgradeType: string, systemId?: number) => void;
   onDispatchFleet: (destSysId: number, ships: Record<string, number>) => void;
@@ -35,6 +38,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   setSelectedSystemId,
   setSelectedFleetId,
   onEndTurn,
+  onReturnToMenu,
+  onRenamePlayer,
+  onCancelEndTurn,
   onQueueShip,
   onUpgradeSystem,
   onDispatchFleet,
@@ -353,11 +359,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>GALACTIC TURN</div>
             <div className="telemetry" style={{ fontSize: '16px', fontWeight: 'bold' }}>#{gameState.turnNumber}</div>
           </div>
+          <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: '12px 18px', fontWeight: 'bold' }}>
+            HOME
+          </button>
           <button className="btn-sci-fi pulse-light" onClick={onEndTurn} style={{ padding: '12px 24px', fontWeight: 'bold' }}>
             END TURN
           </button>
@@ -1041,7 +1050,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span>{player.name}</span>
+                        {isPlayerLocalToClient(player) ? (
+                          <input
+                            type="text"
+                            value={player.name}
+                            onChange={(e) => {
+                              onRenamePlayer(player.id, e.target.value);
+                            }}
+                            style={{
+                              background: 'rgba(0, 0, 0, 0.4)',
+                              border: '1px solid rgba(0, 240, 255, 0.3)',
+                              color: 'white',
+                              fontSize: '11px',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              width: '100px',
+                              fontFamily: 'Share Tech Mono'
+                            }}
+                          />
+                        ) : (
+                          <span>{player.name}</span>
+                        )}
                         {player.type === 'ai' && <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>[AI]</span>}
                         {isMe && <span style={{ fontSize: '9px', color: 'var(--accent-cyan)' }}>[YOU]</span>}
                       </div>
@@ -1206,6 +1235,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 })}
               </div>
             </div>
+
+            {/* Cancel Turn End Button */}
+            {(() => {
+              const myPlayer = gameState.players.find(p => p.assignedEmail === currentUserEmail || (p.id === 1 && isPlayerLocalToClient(p)));
+              const activeHumans = gameState.players.filter(p => p.type === 'human' && !gameState.playerState[p.id]?.lost);
+              const othersPending = activeHumans.some(p => p.id !== myPlayer?.id && !p.endedTurn);
+              if (myPlayer && myPlayer.endedTurn && othersPending && onCancelEndTurn) {
+                return (
+                  <div style={{ width: '100%' }}>
+                    <button
+                      className="btn-sci-fi btn-danger animate-pulse"
+                      style={{ width: '100%', justifyContent: 'center' }}
+                      onClick={() => onCancelEndTurn(myPlayer.id)}
+                    >
+                      CANCEL END TURN (RESUME TACTICAL ORDERS)
+                    </button>
+                    <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)', margin: '15px 0' }} />
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Owner action: can force player to local to take turn for them */}
             {gameOwnerEmail === currentUserEmail && (

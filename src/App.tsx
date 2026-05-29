@@ -36,10 +36,11 @@ import {
   getGame,
   updateGame,
   deleteGame,
-  GameMetadata
+  GameMetadata,
+  updateSettings
 } from './game/gameApi';
 
-type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over';
+type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings';
 
 interface PlayerSetup {
   id: number;
@@ -117,6 +118,27 @@ export default function App() {
   // Google OAuth State
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
   const [customGoogleEmail, setCustomGoogleEmail] = useState('');
+
+  const [settingsDisplayName, setSettingsDisplayName] = useState<string>('');
+
+  React.useEffect(() => {
+    if (currentUser) {
+      setSettingsDisplayName(currentUser.displayName || localStorage.getItem('starswarm_display_name') || '');
+    } else {
+      setSettingsDisplayName(localStorage.getItem('starswarm_display_name') || '');
+    }
+  }, [currentUser]);
+
+  React.useEffect(() => {
+    const localName = currentUser?.displayName || localStorage.getItem('starswarm_display_name') || 'Vanguard (You)';
+    setPlayersSetup(prev => {
+      const copy = [...prev];
+      if (copy[0]) {
+        copy[0].name = localName;
+      }
+      return copy;
+    });
+  }, [currentUser]);
 
   // Map settings notice
   const [recNotice, setRecNotice] = useState<string | null>(null);
@@ -201,6 +223,141 @@ export default function App() {
     setGameState(null);
     setScreen('menu');
     loadGamesList();
+  };
+
+  // Helper: Save display name settings globally
+  const handleSaveSettings = async () => {
+    localStorage.setItem('starswarm_display_name', settingsDisplayName);
+    if (currentUser) {
+      const res = await updateSettings(settingsDisplayName);
+      if (res.success) {
+        const updatedUser = await checkSession();
+        if (updatedUser) {
+          setCurrentUser(updatedUser);
+        }
+      } else {
+        showError(res.error || 'Failed to update settings on server.');
+        return;
+      }
+    }
+    setScreen('menu');
+  };
+
+  // Helper: Rename player in game
+  const handleRenamePlayer = (playerId: number, newName: string) => {
+    if (!gameState) return;
+    const stateCopy = { ...gameState };
+    const player = stateCopy.players.find(p => p.id === playerId);
+    if (player) {
+      player.name = newName;
+    }
+    const pState = stateCopy.playerState[playerId];
+    if (pState) {
+      pState.name = newName;
+    }
+    setGameState(stateCopy);
+    syncGameState(stateCopy);
+  };
+
+  // Helper: Cancel end turn inside the active game
+  const handleCancelEndTurn = (playerId: number) => {
+    if (!gameState) return;
+    const stateCopy = { ...gameState };
+    const player = stateCopy.players.find(p => p.id === playerId);
+    if (player) {
+      player.endedTurn = false;
+      stateCopy.activePlayerIdx = stateCopy.players.indexOf(player);
+      setGameState(stateCopy);
+      syncGameState(stateCopy);
+      setScreen('game');
+    }
+  };
+
+  // Helper: Cancel end turn directly from game card on home screen
+  const handleCancelEndTurnForGame = async (gameId: string, playerId: number) => {
+    const res = await getGame(gameId);
+    if (res.success && res.game) {
+      const stateCopy = res.game.gameState;
+      const player = stateCopy.players.find(p => p.id === playerId);
+      if (player) {
+        player.endedTurn = false;
+        stateCopy.activePlayerIdx = stateCopy.players.indexOf(player);
+        const updateRes = await updateGame(gameId, stateCopy);
+        if (updateRes.success) {
+          const gamesRes = await listGames();
+          if (gamesRes.success && gamesRes.games) {
+            setSavedGames(gamesRes.games);
+          }
+        }
+      }
+    }
+  };
+
+  // Helper: Get Game Turn Status for home page saved games
+  const getGameTurnStatus = (game: GameMetadata, currentUserEmail: string | null) => {
+    let state: GameState;
+    try {
+      state = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
+    } catch (e) {
+      return 'UNKNOWN';
+    }
+    if (!state || !state.players || !state.playerState) return 'UNKNOWN';
+
+    const activeTeams = new Set<number>();
+    state.players.forEach(p => {
+      const pState = state.playerState[p.id];
+      if (pState && !pState.lost) {
+        activeTeams.add(p.team);
+      }
+    });
+    if (activeTeams.size <= 1) {
+      return 'GAME OVER';
+    }
+
+    const activeHumans = state.players.filter(p => p.type === 'human' && !state.playerState[p.id]?.lost);
+    const userPlayer = activeHumans.find(p => p.assignedEmail === currentUserEmail || (p.id === 1 && p.isLocal));
+
+    if (userPlayer && !userPlayer.endedTurn) {
+      return 'YOUR TURN';
+    }
+
+    const pendingPlayers = activeHumans.filter(p => !p.endedTurn);
+    if (pendingPlayers.length === 1) {
+      return `WAITING ON: ${pendingPlayers[0].name.toUpperCase()}`;
+    } else if (pendingPlayers.length > 1) {
+      return 'WAITING ON OTHER PLAYERS';
+    }
+
+    return 'PROCESSING TURN...';
+  };
+
+  // Helper: Check if end turn can be cancelled from the home screen
+  const canCancelEndTurnInGame = (game: GameMetadata): boolean => {
+    if (!currentUser) return false;
+    let state: GameState;
+    try {
+      state = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
+    } catch (e) {
+      return false;
+    }
+    if (!state || !state.players || !state.playerState) return false;
+
+    const activeTeams = new Set<number>();
+    state.players.forEach(p => {
+      const pState = state.playerState[p.id];
+      if (pState && !pState.lost) {
+        activeTeams.add(p.team);
+      }
+    });
+    if (activeTeams.size <= 1) return false;
+
+    const activeHumans = state.players.filter(p => p.type === 'human' && !state.playerState[p.id]?.lost);
+    const userPlayer = activeHumans.find(p => p.assignedEmail === currentUser.email || (p.id === 1 && p.isLocal));
+
+    if (!userPlayer || !userPlayer.endedTurn) return false;
+
+    const othersPending = activeHumans.some(p => p.id !== userPlayer.id && !p.endedTurn);
+    return othersPending;
   };
 
   // Initialize CSRF and restore session cookie on mount
@@ -611,8 +768,9 @@ export default function App() {
   // Initialize unified Skirmish Match Lobby
   const handleStartSkirmishLobby = () => {
     const ownerEmail = currentUser?.email || '';
+    const localName = currentUser?.displayName || localStorage.getItem('starswarm_display_name') || 'Vanguard (You)';
     const newSetup: PlayerSetup[] = [
-      { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff', isLocal: true, assignedEmail: ownerEmail, endedTurn: false },
+      { id: 1, name: localName, type: 'human', team: 1, color: '#00f0ff', isLocal: true, assignedEmail: ownerEmail, endedTurn: false },
       { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false },
       { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false },
       { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false }
@@ -1037,7 +1195,7 @@ export default function App() {
       )}
 
       {/* AUTHENTICATION HUD OVERLAY (Only visible in menus/lobby) */}
-      {(screen === 'menu' || screen === 'lobby' || screen === 'game-over') && (
+      {(screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings') && (
         <div style={{
           position: 'absolute',
           top: '20px',
@@ -1058,20 +1216,28 @@ export default function App() {
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>COMMAND CODES ACTIVE</div>
                 <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent-cyan)' }}>
-                  {currentUser.email}
+                  {currentUser.displayName || currentUser.email}
                 </div>
                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }} className="telemetry">
                   RECORD: {currentUser.stats.gamesWon}W - {currentUser.stats.gamesPlayed - currentUser.stats.gamesWon}L
                 </div>
               </div>
+              <button className="btn-sci-fi" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={() => setScreen('settings')}>
+                SETTINGS
+              </button>
               <button className="btn-sci-fi btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleLogout}>
                 LOG OUT
               </button>
             </div>
           ) : (
-            <button className="btn-sci-fi" style={{ padding: '8px 16px', fontSize: '12px' }} onClick={() => { clearAuthInputs(); setIsAuthModalOpen(true); }}>
-              ESTABLISH COMMAND LINK
-            </button>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <button className="btn-sci-fi" style={{ padding: '8px 16px', fontSize: '12px' }} onClick={() => setScreen('settings')}>
+                SETTINGS
+              </button>
+              <button className="btn-sci-fi" style={{ padding: '8px 16px', fontSize: '12px' }} onClick={() => { clearAuthInputs(); setIsAuthModalOpen(true); }}>
+                ESTABLISH COMMAND LINK
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -1191,8 +1357,46 @@ export default function App() {
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }} className="telemetry">
                           UPDATED: {new Date(game.updated_at).toLocaleString()}
                         </div>
+                        <div style={{
+                          fontSize: '11px',
+                          color: 'var(--text-secondary)',
+                          marginTop: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>STATUS:</span>
+                          <span style={{
+                            color: getGameTurnStatus(game, currentUser?.email || null) === 'YOUR TURN' ? 'var(--accent-green)' : 'var(--accent-yellow)',
+                            fontWeight: 'bold',
+                            fontFamily: 'Share Tech Mono'
+                          }}>
+                            {getGameTurnStatus(game, currentUser?.email || null)}
+                          </span>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {canCancelEndTurnInGame(game) && (
+                          <button
+                            className="btn-sci-fi btn-danger animate-pulse"
+                            style={{ padding: '6px 12px', fontSize: '11px' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              let stateObj: GameState;
+                              try {
+                                stateObj = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
+                                const userPlayer = stateObj.players.find(p => p.assignedEmail === currentUser?.email || (p.id === 1 && p.isLocal));
+                                if (userPlayer) {
+                                  handleCancelEndTurnForGame(game.id, userPlayer.id);
+                                }
+                              } catch (err) {
+                                console.error(err);
+                              }
+                            }}
+                          >
+                            CANCEL TURN END
+                          </button>
+                        )}
                         <button 
                           className="btn-sci-fi" 
                           style={{ padding: '6px 12px', fontSize: '11px' }}
@@ -1614,6 +1818,9 @@ export default function App() {
             setSelectedSystemId={setSelectedSystemId}
             setSelectedFleetId={setSelectedFleetId}
             onEndTurn={handleEndTurn}
+            onReturnToMenu={handleReturnToMenu}
+            onRenamePlayer={handleRenamePlayer}
+            onCancelEndTurn={handleCancelEndTurn}
             onQueueShip={handleQueueShip}
             onUpgradeSystem={handleUpgradeSystem}
             onDispatchFleet={handleDispatchFleet}
@@ -1662,9 +1869,27 @@ export default function App() {
                 {nextHumanPlayer.name}
               </div>
             </div>
-            <button className="btn-sci-fi" style={{ justifyContent: 'center', margin: '10px auto 0' }} onClick={() => setScreen('game')}>
-              INITIALIZE COMMAND HUD
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => setScreen('game')}>
+                INITIALIZE COMMAND HUD
+              </button>
+              {(() => {
+                const activeHumans = gameState?.players.filter(p => p.type === 'human' && !gameState?.playerState[p.id]?.lost) || [];
+                const endedPlayer = activeHumans.find(p => p.endedTurn);
+                if (endedPlayer) {
+                  return (
+                    <button
+                      className="btn-sci-fi btn-danger"
+                      style={{ justifyContent: 'center' }}
+                      onClick={() => handleCancelEndTurn(endedPlayer.id)}
+                    >
+                      CANCEL END TURN & RETURN TO {endedPlayer.name.toUpperCase()}
+                    </button>
+                  );
+                }
+                return null;
+              })()}
+            </div>
           </div>
         </div>
       )}
@@ -1703,6 +1928,62 @@ export default function App() {
             <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={handleReturnToMenu}>
               RETURN TO COMMAND CENTER
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* SETTINGS SCREEN */}
+      {screen === 'settings' && (
+        <div style={{
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1,
+          position: 'relative',
+          padding: '20px'
+        }}>
+          <div style={{
+            width: '450px',
+            padding: '30px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }} className="glass-panel glass-panel-neon-cyan">
+            <h2 style={{ fontSize: '24px', color: 'var(--accent-cyan)', textAlign: 'center', fontFamily: 'Orbitron' }}>
+              COMMANDER SETTINGS
+            </h2>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
+                Global Display Name
+              </label>
+              <input
+                type="text"
+                value={settingsDisplayName}
+                onChange={(e) => setSettingsDisplayName(e.target.value)}
+                placeholder="Enter display name..."
+                style={{
+                  background: 'rgba(0,0,0,0.5)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'white',
+                  padding: '10px 14px',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  fontFamily: 'Share Tech Mono'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
+              <button className="btn-sci-fi" onClick={handleSaveSettings} style={{ flex: 1, justifyContent: 'center' }}>
+                SAVE CHANGES
+              </button>
+              <button className="btn-sci-fi btn-danger" onClick={() => setScreen('menu')}>
+                CANCEL
+              </button>
+            </div>
           </div>
         </div>
       )}
