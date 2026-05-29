@@ -9,6 +9,7 @@ interface StarMapProps {
   selectedFleetId: string | null;
   setSelectedFleetId: (id: string | null) => void;
   onSelectTargetSystem: (sys: StarSystem) => void;
+  centerOnCoords: { x: number; y: number; trigger: number } | null;
 }
 
 export const StarMap: React.FC<StarMapProps> = ({
@@ -19,6 +20,7 @@ export const StarMap: React.FC<StarMapProps> = ({
   selectedFleetId,
   setSelectedFleetId,
   onSelectTargetSystem,
+  centerOnCoords,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -57,6 +59,17 @@ export const StarMap: React.FC<StarMapProps> = ({
     setPanX(50);
     setPanY(50);
   };
+
+  // Centering on coordinates
+  useEffect(() => {
+    if (centerOnCoords && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      setPanX(cx - centerOnCoords.x * cellSize * zoom);
+      setPanY(cy - centerOnCoords.y * cellSize * zoom);
+    }
+  }, [centerOnCoords]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

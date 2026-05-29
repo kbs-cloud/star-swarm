@@ -846,3 +846,52 @@ export function processTurnEnd(gameState: GameState): void {
   gameState.combatLog = [...newCombatLogs, ...gameState.combatLog].slice(0, 30);
   gameState.turnNumber += 1;
 }
+
+export function cancelDispatch(
+  gameState: GameState,
+  playerId: number,
+  fleetId: string
+): { success: boolean; reason?: string } {
+  const fleetIndex = gameState.fleets.findIndex(f => f.id === fleetId);
+  if (fleetIndex === -1) return { success: false, reason: 'Fleet not found.' };
+  const fleet = gameState.fleets[fleetIndex];
+  if (fleet.owner !== playerId) return { success: false, reason: 'Unauthorized.' };
+  
+  if (fleet.turnsRemaining !== fleet.totalTurns || fleet.isRecalling) {
+    return { success: false, reason: 'Fleet has already departed. Use Recall instead.' };
+  }
+  
+  const sourceSystem = gameState.systems.find(s => s.id === fleet.source.id);
+  if (sourceSystem) {
+    for (const [shipType, qty] of Object.entries(fleet.ships)) {
+      sourceSystem.ships[shipType] = (sourceSystem.ships[shipType] || 0) + qty;
+    }
+  }
+  
+  gameState.fleets.splice(fleetIndex, 1);
+  return { success: true };
+}
+
+export function cancelProduction(
+  gameState: GameState,
+  playerId: number,
+  systemId: number,
+  jobIndex: number
+): { success: boolean; reason?: string } {
+  const sys = gameState.systems.find(s => s.id === systemId);
+  if (!sys || sys.owner !== playerId) return { success: false, reason: 'System not owned.' };
+  
+  if (!sys.buildQueue || jobIndex < 0 || jobIndex >= sys.buildQueue.length) {
+    return { success: false, reason: 'Production job not found.' };
+  }
+  
+  const job = sys.buildQueue[jobIndex];
+  const shipDef = SHIP_TYPES[job.shipType];
+  if (shipDef) {
+    gameState.playerState[playerId].resources += shipDef.cost;
+  }
+  
+  sys.buildQueue.splice(jobIndex, 1);
+  return { success: true };
+}
+

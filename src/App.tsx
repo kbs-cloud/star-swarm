@@ -6,6 +6,8 @@ import {
   recallFleet,
   upgradeSystem,
   queueShipProduction,
+  cancelDispatch,
+  cancelProduction,
   GameState,
   StarSystem,
   FACTION_INFO,
@@ -78,6 +80,7 @@ export default function App() {
   const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
   const [targetSystem, setTargetSystem] = useState<StarSystem | null>(null);
   const [alertMsg, setAlertMsg] = useState<string | null>(null);
+  const [centerOnCoords, setCenterOnCoords] = useState<{ x: number; y: number; trigger: number } | null>(null);
 
   // Transition tracking
   const [nextHumanPlayer, setNextHumanPlayer] = useState<PlayerSetup | null>(null);
@@ -561,6 +564,35 @@ export default function App() {
       setSelectedFleetId(null);
     } else {
       showError(res.reason || 'Failed to cancel fleet travel.');
+    }
+  };
+
+  // Handle cancel dispatch
+  const handleCancelDispatch = (fleetId: string) => {
+    if (!gameState || !activePlayer) return;
+    const stateCopy = { ...gameState };
+    const res = cancelDispatch(stateCopy, activePlayer.id, fleetId);
+    if (res.success) {
+      setGameState(stateCopy);
+      syncGameState(stateCopy);
+      if (selectedFleetId === fleetId) {
+        setSelectedFleetId(null);
+      }
+    } else {
+      showError(res.reason || 'Failed to cancel dispatch.');
+    }
+  };
+
+  // Handle cancel production
+  const handleCancelProduction = (systemId: number, jobIndex: number) => {
+    if (!gameState || !activePlayer) return;
+    const stateCopy = { ...gameState };
+    const res = cancelProduction(stateCopy, activePlayer.id, systemId, jobIndex);
+    if (res.success) {
+      setGameState(stateCopy);
+      syncGameState(stateCopy);
+    } else {
+      showError(res.reason || 'Failed to cancel production.');
     }
   };
 
@@ -1210,17 +1242,23 @@ export default function App() {
             selectedFleetId={selectedFleetId}
             setSelectedFleetId={setSelectedFleetId}
             onSelectTargetSystem={handleSelectTargetSystem}
+            centerOnCoords={centerOnCoords}
           />
           <Dashboard
             gameState={gameState}
             activePlayerId={activePlayer?.id || 1}
             selectedSystemId={selectedSystemId}
             selectedFleetId={selectedFleetId}
+            setSelectedSystemId={setSelectedSystemId}
+            setSelectedFleetId={setSelectedFleetId}
             onEndTurn={handleEndTurn}
             onQueueShip={handleQueueShip}
             onUpgradeSystem={handleUpgradeSystem}
             onDispatchFleet={handleDispatchFleet}
             onRecallFleet={handleRecallFleet}
+            onCancelDispatch={handleCancelDispatch}
+            onCancelProduction={handleCancelProduction}
+            onCenterOnCoords={(x, y) => setCenterOnCoords({ x, y, trigger: Date.now() })}
             targetSystem={targetSystem}
             setTargetSystem={setTargetSystem}
             currentUserEmail={currentUser?.email || ""}

@@ -6,11 +6,16 @@ interface DashboardProps {
   activePlayerId: number;
   selectedSystemId: number | null;
   selectedFleetId: string | null;
+  setSelectedSystemId: (id: number | null) => void;
+  setSelectedFleetId: (id: string | null) => void;
   onEndTurn: () => void;
   onQueueShip: (shipType: string) => void;
   onUpgradeSystem: (upgradeType: string, systemId?: number) => void;
   onDispatchFleet: (destSysId: number, ships: Record<string, number>) => void;
   onRecallFleet: (fleetId: string) => void;
+  onCancelDispatch: (fleetId: string) => void;
+  onCancelProduction: (systemId: number, jobIndex: number) => void;
+  onCenterOnCoords: (x: number, y: number) => void;
   targetSystem: StarSystem | null;
   setTargetSystem: (sys: StarSystem | null) => void;
   currentUserEmail: string;
@@ -27,11 +32,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   activePlayerId,
   selectedSystemId,
   selectedFleetId,
+  setSelectedSystemId,
+  setSelectedFleetId,
   onEndTurn,
   onQueueShip,
   onUpgradeSystem,
   onDispatchFleet,
   onRecallFleet,
+  onCancelDispatch,
+  onCancelProduction,
+  onCenterOnCoords,
   targetSystem,
   setTargetSystem,
   currentUserEmail,
@@ -59,6 +69,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // State for active combat log expanded index
   const [selectedBattleLogIndex, setSelectedBattleLogIndex] = useState<number | null>(null);
+
+  // Collapsible panels for Strategic Command
+  const [showDominion, setShowDominion] = useState(true);
+  const [showActiveSwarms, setShowActiveSwarms] = useState(true);
+  const [showTacticalQueue, setShowTacticalQueue] = useState(true);
 
   if (!activePlayer) return null;
 
@@ -107,13 +122,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const renderCombatLog = () => {
-    if (gameState.combatLog.length === 0) {
+    const myTeam = activePlayerId ? gameState.playerState[activePlayerId]?.team : null;
+    const visibleLogs = gameState.combatLog.filter(log => {
+      if (log.type === 'battle') {
+        const attackerTeam = log.attacker ? gameState.playerState[log.attacker]?.team : null;
+        const defenderTeam = (log.defender && log.defender !== 0) ? gameState.playerState[log.defender]?.team : null;
+        return (
+          log.attacker === activePlayerId ||
+          (attackerTeam !== null && attackerTeam === myTeam) ||
+          log.defender === activePlayerId ||
+          (defenderTeam !== null && defenderTeam === myTeam)
+        );
+      }
+      if (log.type === 'merge') {
+        const mergePlayerTeam = log.playerId ? gameState.playerState[log.playerId]?.team : null;
+        return (
+          log.playerId === activePlayerId ||
+          (mergePlayerTeam !== null && mergePlayerTeam === myTeam)
+        );
+      }
+      if (log.type === 'elimination') {
+        return true;
+      }
+      return false;
+    });
+
+    if (visibleLogs.length === 0) {
       return <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No tactical reports recorded.</div>;
     }
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto' }}>
-        {gameState.combatLog.map((log, idx) => {
+        {visibleLogs.map((log, idx) => {
           if (log.type === 'battle' && log.results) {
             const r = log.results;
             const attackerColor = gameState.playerState[r.attackerId]?.color || '#ffffff';
@@ -220,6 +260,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   };
 
+  const ownedSystems = gameState.systems.filter(s => s.owner === activePlayerId);
+  const ownedFleets = gameState.fleets.filter(f => f.owner === activePlayerId);
+  const cancelableFleets = gameState.fleets.filter(f => f.owner === activePlayerId && f.turnsRemaining === f.totalTurns && !f.isRecalling);
+  
+  const cancelableBuilds: { systemId: number; systemName: string; job: any; jobIndex: number }[] = [];
+  ownedSystems.forEach(sys => {
+    if (sys.buildQueue) {
+      sys.buildQueue.forEach((job, idx) => {
+        cancelableBuilds.push({
+          systemId: sys.id,
+          systemName: sys.name,
+          job,
+          jobIndex: idx
+        });
+      });
+    }
+  });
+
   return (
     <div style={{ width: '100%', height: '100%', pointerEvents: 'none', position: 'absolute', top: 0, left: 0, zIndex: 10 }}>
       {/* 1. TOP BAR */}
@@ -301,22 +359,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }}>
         {/* star system inspector */}
         {selectedSystem && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }} className="glass-panel">
-            <div style={{ marginBottom: '12px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>STAR CLUSTER TELEMETRY</span>
-              <h2 className="text-neon-cyan" style={{ fontSize: '22px', margin: '4px 0' }}>{selectedSystem.name}</h2>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                Coordinates: <span className="telemetry">{selectedSystem.x} LY, {selectedSystem.y} LY</span>
+          <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }} className="glass-panel">
+            <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>STAR CLUSTER TELEMETRY</span>
+                <h2 className="text-neon-cyan" style={{ fontSize: '22px', margin: '4px 0' }}>{selectedSystem.name}</h2>
               </div>
-              <div style={{ fontSize: '13px', marginTop: '6px', color: selectedSystem.owner === 0 ? '#8ba2b5' : (gameState.playerState[selectedSystem.owner]?.color || '#ffffff') }}>
-                Owner: <strong>{selectedSystem.owner === 0 ? 'Neutral / Independent' : (gameState.playerState[selectedSystem.owner]?.name || 'Unknown')}</strong>
-              </div>
-              {selectedSystem.owner !== 0 && (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Generates +{selectedSystem.resourcesPerTurn} resources/turn
-                </div>
-              )}
+              <button
+                className="btn-sci-fi btn-danger"
+                style={{ padding: '4px 8px', fontSize: '10px' }}
+                onClick={() => setSelectedSystemId(null)}
+              >
+                ✕
+              </button>
             </div>
+            
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+              Coordinates: <span className="telemetry">{selectedSystem.x} LY, {selectedSystem.y} LY</span>
+            </div>
+            <div style={{ fontSize: '13px', color: selectedSystem.owner === 0 ? '#8ba2b5' : (gameState.playerState[selectedSystem.owner]?.color || '#ffffff'), marginBottom: '4px' }}>
+              Owner: <strong>{selectedSystem.owner === 0 ? 'Neutral / Independent' : (gameState.playerState[selectedSystem.owner]?.name || 'Unknown')}</strong>
+            </div>
+            {selectedSystem.owner !== 0 && (
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                Generates +{selectedSystem.resourcesPerTurn} resources/turn
+              </div>
+            )}
 
             <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />
 
@@ -383,11 +451,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           gap: '6px'
                         }}>
                           {selectedSystem.buildQueue.map((job, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
                               <span>{idx === 0 ? '[CURRENT] ' : ''}{job.shipType}</span>
-                              <span className="telemetry" style={{ color: 'var(--accent-green)' }}>
-                                {job.turnsRemaining} {job.turnsRemaining === 1 ? 'Turn' : 'Turns'} left
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span className="telemetry" style={{ color: 'var(--accent-green)' }}>
+                                  {job.turnsRemaining} {job.turnsRemaining === 1 ? 'Turn' : 'Turns'} left
+                                </span>
+                                <button
+                                  className="btn-sci-fi btn-danger"
+                                  style={{ padding: '0 4px', fontSize: '8px' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onCancelProduction(selectedSystem.id, idx);
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -476,11 +556,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {/* fleet inspector */}
         {selectedFleet && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }} className="glass-panel">
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>FLEET SCANNERS ACTIVE</span>
-            <h2 className="text-neon-yellow" style={{ fontSize: '20px', margin: '4px 0' }}>Swarms Sector {Math.round(selectedFleet.currentPos.x)}, {Math.round(selectedFleet.currentPos.y)}</h2>
+          <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }} className="glass-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>FLEET SCANNERS ACTIVE</span>
+                <h2 className="text-neon-yellow" style={{ fontSize: '20px', margin: '4px 0' }}>Swarms Sector {Math.round(selectedFleet.currentPos.x)}, {Math.round(selectedFleet.currentPos.y)}</h2>
+              </div>
+              <button
+                className="btn-sci-fi btn-danger"
+                style={{ padding: '4px 8px', fontSize: '10px' }}
+                onClick={() => setSelectedFleetId(null)}
+              >
+                ✕
+              </button>
+            </div>
             
-            <div style={{ marginTop: '8px', fontSize: '13px' }}>
+            <div style={{ fontSize: '13px', marginBottom: '6px' }}>
               Owner: <strong style={{ color: gameState.playerState[selectedFleet.owner]?.color || '#ffffff' }}>{gameState.playerState[selectedFleet.owner]?.name || 'Unknown'}</strong>
             </div>
 
@@ -532,16 +623,254 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         )}
 
-        {/* default no selection panel */}
-        {!selectedSystem && !selectedFleet && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '20px', textAlign: 'center' }} className="glass-panel">
-            <span style={{ fontSize: '32px', filter: 'grayscale(1)', marginBottom: '10px' }}>🛰️</span>
-            <h3 style={{ color: 'var(--accent-cyan)', fontSize: '16px', marginBottom: '8px' }}>AWAITING COMMAND LOCK</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Click on a Star Cluster or moving Fleet on the starmap to interface with its localized computer arrays.
-            </p>
+        {/* STRATEGIC CONSOLE (always shown, fills remaining space) */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', overflow: 'hidden' }} className="glass-panel">
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>STRATEGIC COMMAND</span>
+          <h2 className="text-neon-cyan" style={{ fontSize: '16px', margin: '4px 0 12px' }}>CONCOURSE LOGISTICS</h2>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+            
+            {/* DOMINION REGISTRY ACCORDION */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                onClick={() => setShowDominion(!showDominion)}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  fontFamily: 'Orbitron',
+                  letterSpacing: '1px',
+                  color: 'white',
+                  userSelect: 'none'
+                }}
+              >
+                <span>🌌 DOMINION REGISTRY <span style={{ color: 'var(--text-muted)' }}>({ownedSystems.length})</span></span>
+                <span style={{ transform: showDominion ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>▶</span>
+              </div>
+              
+              {showDominion && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
+                  {ownedSystems.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic', padding: '4px' }}>No stars claimed.</div>
+                  ) : (
+                    ownedSystems.map(sys => (
+                      <div
+                        key={sys.id}
+                        onClick={() => {
+                          setSelectedSystemId(sys.id);
+                          setSelectedFleetId(null);
+                          onCenterOnCoords(sys.x, sys.y);
+                        }}
+                        style={{
+                          background: selectedSystemId === sys.id ? 'rgba(0, 240, 255, 0.08)' : 'rgba(0, 240, 255, 0.02)',
+                          border: selectedSystemId === sys.id ? '1px solid var(--accent-cyan)' : '1px solid rgba(0, 240, 255, 0.1)',
+                          padding: '8px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                          <strong style={{ color: 'var(--accent-cyan)' }}>{sys.name}</strong>
+                          <span className="telemetry" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{sys.x}, {sys.y} LY</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          <span>Defense: {Object.entries(sys.ships).map(([t, q]) => q > 0 ? `${t.substring(0,2)}:${q}` : '').filter(Boolean).join(', ') || 'None'}</span>
+                          <span className="telemetry" style={{ color: 'var(--accent-green)' }}>+{sys.resourcesPerTurn} CR</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ACTIVE SWARMS ACCORDION */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                onClick={() => setShowActiveSwarms(!showActiveSwarms)}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  fontFamily: 'Orbitron',
+                  letterSpacing: '1px',
+                  color: 'white',
+                  userSelect: 'none'
+                }}
+              >
+                <span>🛸 ACTIVE SWARMS <span style={{ color: 'var(--text-muted)' }}>({ownedFleets.length})</span></span>
+                <span style={{ transform: showActiveSwarms ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>▶</span>
+              </div>
+              
+              {showActiveSwarms && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
+                  {ownedFleets.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic', padding: '4px' }}>No active fleets.</div>
+                  ) : (
+                    ownedFleets.map(fleet => (
+                      <div
+                        key={fleet.id}
+                        onClick={() => {
+                          setSelectedFleetId(fleet.id);
+                          setSelectedSystemId(null);
+                          onCenterOnCoords(fleet.currentPos.x, fleet.currentPos.y);
+                        }}
+                        style={{
+                          background: selectedFleetId === fleet.id ? 'rgba(255, 170, 0, 0.08)' : 'rgba(255, 170, 0, 0.02)',
+                          border: selectedFleetId === fleet.id ? '1px solid var(--accent-yellow)' : '1px solid rgba(255, 170, 0, 0.1)',
+                          padding: '8px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                          <strong style={{ color: 'var(--accent-yellow)' }}>
+                            {fleet.source.name} → {fleet.destination.name}
+                          </strong>
+                          <span className="telemetry" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                            {fleet.turnsRemaining}t left {fleet.isRecalling ? '(REC)' : ''}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Swarm: {Object.entries(fleet.ships).map(([t, q]) => q > 0 ? `${t}:${q}` : '').filter(Boolean).join(', ')}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* TACTICAL QUEUE ACCORDION */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                onClick={() => setShowTacticalQueue(!showTacticalQueue)}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  fontFamily: 'Orbitron',
+                  letterSpacing: '1px',
+                  color: 'white',
+                  userSelect: 'none'
+                }}
+              >
+                <span>📋 TACTICAL QUEUE <span style={{ color: 'var(--text-muted)' }}>({cancelableFleets.length + cancelableBuilds.length})</span></span>
+                <span style={{ transform: showTacticalQueue ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>▶</span>
+              </div>
+              
+              {showTacticalQueue && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
+                  {cancelableFleets.length === 0 && cancelableBuilds.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic', padding: '4px' }}>No pending orders this turn.</div>
+                  ) : (
+                    <>
+                      {/* Fleet dispatches */}
+                      {cancelableFleets.map(f => (
+                        <div
+                          key={f.id}
+                          style={{
+                            background: 'rgba(255, 0, 127, 0.03)',
+                            border: '1px solid rgba(255, 0, 127, 0.1)',
+                            padding: '8px',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '8px',
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--accent-magenta)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              Launch: {f.source.name} → {f.destination.name}
+                            </div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {Object.entries(f.ships).map(([t, q]) => q > 0 ? `${t}:${q}` : '').filter(Boolean).join(', ')}
+                            </div>
+                          </div>
+                          <button
+                            className="btn-sci-fi btn-danger"
+                            style={{ padding: '2px 8px', fontSize: '9px' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCancelDispatch(f.id);
+                            }}
+                          >
+                            CANCEL
+                          </button>
+                        </div>
+                      ))}
+                      
+                      {/* Production jobs */}
+                      {cancelableBuilds.map((b, bIdx) => (
+                        <div
+                          key={`${b.systemId}-${b.jobIndex}-${bIdx}`}
+                          style={{
+                            background: 'rgba(57, 255, 20, 0.03)',
+                            border: '1px solid rgba(57, 255, 20, 0.1)',
+                            padding: '8px',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '8px',
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--accent-green)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              Build: {b.job.shipType} @ {b.systemName}
+                            </div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                              Queue Position: #{b.jobIndex + 1} ({b.job.turnsRemaining}t left)
+                            </div>
+                          </div>
+                          <button
+                            className="btn-sci-fi btn-danger"
+                            style={{ padding: '2px 8px', fontSize: '9px' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCancelProduction(b.systemId, b.jobIndex);
+                            }}
+                          >
+                            CANCEL
+                          </button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
           </div>
-        )}
+        </div>
       </div>
 
       {/* 3. RIGHT SIDE PANEL - FLEET DISPATCH OR COMBAT LOG */}
