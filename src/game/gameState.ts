@@ -19,6 +19,7 @@ export interface UpgradeDef {
 }
 
 export interface GameRules {
+  version?: number;
   id: string;
   name: string;
   description: string;
@@ -239,6 +240,7 @@ export const UPGRADES: Record<string, UpgradeDef> = {
 };
 
 export const NORMAL_RULES: GameRules = {
+  version: 1,
   id: 'normal',
   name: 'Normal Mode',
   description: 'Standard rules with shipyard queues, resource collection, and tech upgrades.',
@@ -272,6 +274,7 @@ export const NORMAL_RULES: GameRules = {
 };
 
 export const SIMPLE_RULES: GameRules = {
+  version: 1,
   id: 'simple',
   name: 'Simple Mode',
   description: 'Nodes produce ships directly. One ship type, no upgrades, and no credits.',

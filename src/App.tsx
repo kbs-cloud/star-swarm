@@ -95,6 +95,16 @@ export default function App() {
   const [editingRules, setEditingRules] = useState<GameRules | null>(null);
   const [newShipTypeKey, setNewShipTypeKey] = useState('');
 
+  // Import/Export Rules State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importString, setImportString] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importRulesPreview, setImportRulesPreview] = useState<GameRules | null>(null);
+  const [importOriginalVersion, setImportOriginalVersion] = useState<number | null>(null);
+  const [isImportPreviewOpen, setIsImportPreviewOpen] = useState(false);
+  const [importPreviewErrors, setImportPreviewErrors] = useState<string[]>([]);
+  const [newImportShipTypeKey, setNewImportShipTypeKey] = useState('');
+
   // Authentication State
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(getCurrentUser());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -222,9 +232,14 @@ export default function App() {
     bootstrap();
   }, []);
 
-  // Load custom game modes from local storage on mount
+  // Load custom game modes when current user changes
   React.useEffect(() => {
-    const stored = localStorage.getItem('starswarm_custom_rules');
+    const email = currentUser?.email;
+    const key = email ? `starswarm_custom_rules_${email}` : 'starswarm_custom_rules_guest';
+    let stored = localStorage.getItem(key);
+    if (!stored && !email) {
+      stored = localStorage.getItem('starswarm_custom_rules');
+    }
     try {
       const parsedStored: GameRules[] = stored ? JSON.parse(stored) : [];
       setGameModes([NORMAL_RULES, SIMPLE_RULES, ...parsedStored]);
@@ -232,7 +247,7 @@ export default function App() {
       console.error('Failed to parse custom rules', e);
       setGameModes([NORMAL_RULES, SIMPLE_RULES]);
     }
-  }, []);
+  }, [currentUser?.email]);
 
   // Periodic polling loop for game state & presence updates
   React.useEffect(() => {
@@ -346,7 +361,9 @@ export default function App() {
   const [editorErrors, setEditorErrors] = useState<string[]>([]);
 
   const saveCustomModes = (customs: GameRules[]) => {
-    localStorage.setItem('starswarm_custom_rules', JSON.stringify(customs));
+    const email = currentUser?.email;
+    const key = email ? `starswarm_custom_rules_${email}` : 'starswarm_custom_rules_guest';
+    localStorage.setItem(key, JSON.stringify(customs));
     setGameModes([NORMAL_RULES, SIMPLE_RULES, ...customs]);
   };
 
@@ -385,6 +402,166 @@ export default function App() {
     setSelectedModeId(editingRules.id);
     setIsRulesEditorOpen(false);
     setEditingRules(null);
+  };
+
+  const handleExportRules = () => {
+    const currentMode = gameModes.find(m => m.id === selectedModeId);
+    if (!currentMode) return;
+    try {
+      const rulesCopy = { ...currentMode };
+      rulesCopy.version = rulesCopy.version || 1;
+      rulesCopy.isDefault = false;
+
+      const jsonStr = JSON.stringify(rulesCopy);
+      const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
+      const exportStr = `SS-RULES-V${rulesCopy.version || 1}-${b64}`;
+      
+      navigator.clipboard.writeText(exportStr).then(() => {
+        setAlertMsg('RULESET PROTOCOL EXPORTED TO CLIPBOARD');
+        setTimeout(() => setAlertMsg(null), 3000);
+      }).catch(err => {
+        console.error('Clipboard export failed', err);
+        alert(`Export String:\n\n${exportStr}`);
+      });
+    } catch (e) {
+      console.error('Ruleset export serialization failed', e);
+      showError('Failed to serialize ruleset for export.');
+    }
+  };
+
+  const handleProcessImport = () => {
+    setImportError(null);
+    setImportPreviewErrors([]);
+    const input = importString.trim();
+    if (!input) {
+      setImportError('Please enter a ruleset configuration string.');
+      return;
+    }
+
+    try {
+      let parsedRules: GameRules | null = null;
+      let importedVersion = 1;
+
+      if (input.startsWith('SS-RULES-')) {
+        const parts = input.split('-');
+        if (parts.length >= 4) {
+          const verStr = parts[2];
+          importedVersion = parseInt(verStr.replace('V', '')) || 1;
+          const b64 = parts.slice(3).join('-');
+          const decodedJson = decodeURIComponent(escape(atob(b64)));
+          parsedRules = JSON.parse(decodedJson);
+        } else {
+          throw new Error('Invalid prefix format.');
+        }
+      } else {
+        try {
+          const decodedJson = decodeURIComponent(escape(atob(input)));
+          parsedRules = JSON.parse(decodedJson);
+          importedVersion = parsedRules?.version || 1;
+        } catch {
+          parsedRules = JSON.parse(input);
+          importedVersion = parsedRules?.version || 1;
+        }
+      }
+
+      if (!parsedRules || typeof parsedRules !== 'object') {
+        throw new Error('Invalid ruleset object.');
+      }
+
+      if (!parsedRules.name || !parsedRules.ships) {
+        throw new Error('Missing name or ships attributes.');
+      }
+
+      const CURRENT_RULES_VERSION = 1;
+      const migratedRules: GameRules = {
+        ...parsedRules,
+        version: CURRENT_RULES_VERSION,
+        isDefault: false,
+      };
+
+      migratedRules.id = 'custom_' + Date.now();
+
+      if (migratedRules.enableCredits === undefined) migratedRules.enableCredits = true;
+      if (migratedRules.enableUpgrades === undefined) migratedRules.enableUpgrades = true;
+      if (migratedRules.captureRequiresColonyShip === undefined) migratedRules.captureRequiresColonyShip = true;
+      if (migratedRules.startingResources === undefined) migratedRules.startingResources = 60;
+      
+      if (!migratedRules.resourcesPerTurn) {
+        migratedRules.resourcesPerTurn = { base: 15, randomAdd: 10 };
+      }
+      if (!migratedRules.startingShips) {
+        migratedRules.startingShips = { Fighter: 5 };
+      }
+      if (!migratedRules.neutralStartingShipsRange) {
+        migratedRules.neutralStartingShipsRange = { min: 1, max: 4, type: 'Fighter' };
+      }
+      if (!migratedRules.nodeProduction) {
+        migratedRules.nodeProduction = { enabled: false, shipsPerTurn: 0, shipType: '' };
+      }
+
+      Object.keys(migratedRules.ships).forEach(shipType => {
+        const ship = migratedRules.ships[shipType];
+        if (ship.cost === undefined) ship.cost = 10;
+        if (ship.speed === undefined) ship.speed = 3.0;
+        if (ship.hp === undefined) ship.hp = 1;
+        if (ship.attack === undefined) ship.attack = 1;
+        if (ship.hitChance === undefined) ship.hitChance = 0.5;
+        if (ship.description === undefined) ship.description = 'Imported combat hull.';
+      });
+
+      setImportOriginalVersion(importedVersion);
+      setImportRulesPreview(migratedRules);
+      setIsImportModalOpen(false);
+      setIsImportPreviewOpen(true);
+    } catch (e) {
+      console.error('Import parse error', e);
+      setImportError('Failed to parse the ruleset string. Please verify it is a valid export string.');
+    }
+  };
+
+  const handleConfirmImport = () => {
+    if (!importRulesPreview) return;
+
+    const errors: string[] = [];
+    if (!importRulesPreview.name.trim()) errors.push('Ruleset name cannot be empty.');
+    if (Object.keys(importRulesPreview.ships).length === 0) errors.push('At least one ship type must be defined.');
+    
+    Object.entries(importRulesPreview.ships).forEach(([type, def]) => {
+      if (def.hitChance < 0 || def.hitChance > 1) {
+        errors.push(`Hit chance for ${type} must be between 0.0 and 1.0.`);
+      }
+      if (def.speed <= 0) {
+        errors.push(`Speed for ${type} must be greater than 0.`);
+      }
+      if (def.hp < 1) {
+        errors.push(`HP for ${type} must be at least 1.`);
+      }
+    });
+
+    if (errors.length > 0) {
+      setImportPreviewErrors(errors);
+      return;
+    }
+
+    const customs = gameModes.filter(m => !m.isDefault);
+    let finalName = importRulesPreview.name.trim();
+    const nameExists = gameModes.some(m => m.name.toLowerCase() === finalName.toLowerCase());
+    if (nameExists) {
+      finalName = `${finalName} (Imported)`;
+    }
+
+    const finalRules: GameRules = {
+      ...importRulesPreview,
+      name: finalName
+    };
+
+    const newCustoms = [...customs, finalRules];
+    saveCustomModes(newCustoms);
+    setSelectedModeId(finalRules.id);
+    
+    setIsImportPreviewOpen(false);
+    setImportRulesPreview(null);
+    setImportOriginalVersion(null);
   };
 
   // Start new game
@@ -1138,9 +1315,9 @@ export default function App() {
                       setIsRulesEditorOpen(true);
                     }
                   }}
-                  style={{ padding: '8px 14px', fontSize: '12px' }}
+                  style={{ padding: '8px 10px', fontSize: '11px' }}
                 >
-                  {gameModes.find(m => m.id === selectedModeId)?.isDefault ? 'VIEW RULES' : 'EDIT RULES'}
+                  {gameModes.find(m => m.id === selectedModeId)?.isDefault ? 'VIEW' : 'EDIT'}
                 </button>
 
                 <button
@@ -1159,9 +1336,29 @@ export default function App() {
                       setSelectedModeId(copiedRules.id);
                     }
                   }}
-                  style={{ padding: '8px 14px', fontSize: '12px' }}
+                  style={{ padding: '8px 10px', fontSize: '11px' }}
                 >
-                  COPY MODE
+                  COPY
+                </button>
+
+                <button
+                  className="btn-sci-fi"
+                  onClick={handleExportRules}
+                  style={{ padding: '8px 10px', fontSize: '11px' }}
+                >
+                  EXPORT
+                </button>
+
+                <button
+                  className="btn-sci-fi"
+                  onClick={() => {
+                    setImportString('');
+                    setImportError(null);
+                    setIsImportModalOpen(true);
+                  }}
+                  style={{ padding: '8px 10px', fontSize: '11px' }}
+                >
+                  IMPORT
                 </button>
 
                 {!gameModes.find(m => m.id === selectedModeId)?.isDefault && (
@@ -1174,7 +1371,7 @@ export default function App() {
                         setSelectedModeId('normal');
                       }
                     }}
-                    style={{ padding: '8px 14px', fontSize: '12px' }}
+                    style={{ padding: '8px 10px', fontSize: '11px' }}
                   >
                     DELETE
                   </button>
@@ -2367,6 +2564,556 @@ export default function App() {
               )}
               <button className="btn-sci-fi btn-danger" onClick={() => { setIsRulesEditorOpen(false); setEditingRules(null); }} style={{ flex: editingRules.isDefault ? 1 : 0, justifyContent: 'center' }}>
                 CLOSE
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* IMPORT CODE STRING ENTRY MODAL */}
+      {isImportModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(5, 10, 20, 0.85)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 1000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          pointerEvents: 'auto',
+          color: 'white',
+          fontFamily: 'Share Tech Mono'
+        }}>
+          <div style={{
+            width: '500px',
+            padding: '30px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }} className="glass-panel glass-panel-neon-cyan">
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontFamily: 'Orbitron', color: 'var(--accent-cyan)', margin: 0, fontSize: '18px' }}>
+                IMPORT RULESET PROTOCOL
+              </h2>
+              <button className="btn-sci-fi btn-danger" onClick={() => setIsImportModalOpen(false)}>✕</button>
+            </div>
+
+            {importError && (
+              <div style={{ padding: '10px', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '4px', color: 'var(--accent-magenta)', fontSize: '12px', fontWeight: 'bold' }}>
+                {importError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PASTE CONFIGURATION STRING</label>
+              <textarea
+                value={importString}
+                onChange={(e) => setImportString(e.target.value)}
+                placeholder="Paste SS-RULES-V1-... string here"
+                style={{
+                  width: '100%',
+                  height: '150px',
+                  background: 'rgba(0,0,0,0.5)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'white',
+                  padding: '10px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  boxSizing: 'border-box',
+                  resize: 'none'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '15px' }}>
+              <button className="btn-sci-fi" onClick={handleProcessImport} style={{ flex: 1, justifyContent: 'center' }}>
+                DECRYPT & PREVIEW
+              </button>
+              <button className="btn-sci-fi btn-danger" onClick={() => setIsImportModalOpen(false)}>
+                CANCEL
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* IMPORT & MIGRATION PREVIEW MODAL */}
+      {isImportPreviewOpen && importRulesPreview && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(5, 10, 20, 0.95)',
+          backdropFilter: 'blur(10px)',
+          zIndex: 1000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          pointerEvents: 'auto',
+          color: 'white',
+          fontFamily: 'Share Tech Mono'
+        }}>
+          <div style={{
+            width: '800px',
+            padding: '30px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }} className="glass-panel glass-panel-neon-magenta">
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontFamily: 'Orbitron', color: 'var(--accent-magenta)', margin: 0 }}>
+                RULESET IMPORT PREVIEW & MIGRATION
+              </h2>
+              <button className="btn-sci-fi btn-danger" onClick={() => { setIsImportPreviewOpen(false); setImportRulesPreview(null); }}>✕</button>
+            </div>
+
+            {importOriginalVersion !== null && importOriginalVersion !== 1 ? (
+              <div style={{
+                padding: '12px',
+                background: 'rgba(255, 170, 0, 0.1)',
+                border: '1px solid rgba(255, 170, 0, 0.3)',
+                color: '#ffaa00',
+                borderRadius: '6px',
+                fontSize: '12px',
+                lineHeight: '1.5'
+              }}>
+                <strong>⚠️ SCHEMA MIGRATION DETECTED:</strong> This ruleset is version <strong>V{importOriginalVersion}</strong>, but the current options configuration is <strong>V1</strong>. Missing or deprecated properties have been automatically migrated to default values. Please review the settings below before importing.
+              </div>
+            ) : (
+              <div style={{
+                padding: '8px 12px',
+                background: 'rgba(0, 240, 255, 0.05)',
+                border: '1px solid rgba(0, 240, 255, 0.2)',
+                color: 'var(--accent-cyan)',
+                borderRadius: '4px',
+                fontSize: '12px'
+              }}>
+                ✓ Version Check OK (Ruleset Version V1 verified). Ready to import.
+              </div>
+            )}
+
+            {importPreviewErrors.length > 0 && (
+              <div style={{ padding: '10px', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {importPreviewErrors.map((err, idx) => (
+                  <div key={idx} style={{ color: 'var(--accent-magenta)', fontSize: '12px', fontWeight: 'bold' }}>• {err}</div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              {/* Left Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RULESET NAME</label>
+                  <input
+                    type="text"
+                    value={importRulesPreview.name}
+                    onChange={(e) => setImportRulesPreview({ ...importRulesPreview, name: e.target.value })}
+                    style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '6px 10px', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>DESCRIPTION</label>
+                  <textarea
+                    value={importRulesPreview.description}
+                    onChange={(e) => setImportRulesPreview({ ...importRulesPreview, description: e.target.value })}
+                    style={{ width: '100%', height: '50px', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box', resize: 'none' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={importRulesPreview.enableCredits}
+                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, enableCredits: e.target.checked })}
+                      style={{ accentColor: 'var(--accent-cyan)' }}
+                    />
+                    <span>ENABLE CREDITS / ECONOMY</span>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={importRulesPreview.enableUpgrades}
+                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, enableUpgrades: e.target.checked })}
+                      style={{ accentColor: 'var(--accent-cyan)' }}
+                    />
+                    <span>ENABLE BASE & TECH UPGRADES</span>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={importRulesPreview.captureRequiresColonyShip}
+                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, captureRequiresColonyShip: e.target.checked })}
+                      style={{ accentColor: 'var(--accent-cyan)' }}
+                    />
+                    <span>ANNEXING NEUTRALS REQUIRES COLONY SHIP</span>
+                  </label>
+                </div>
+
+                {importRulesPreview.enableCredits && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', background: 'rgba(0, 240, 255, 0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(0, 240, 255, 0.08)' }}>
+                    <div>
+                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>START CREDITS</label>
+                      <input
+                        type="number"
+                        value={importRulesPreview.startingResources}
+                        onChange={(e) => setImportRulesPreview({ ...importRulesPreview, startingResources: parseInt(e.target.value) || 0 })}
+                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>BASE INCOME</label>
+                      <input
+                        type="number"
+                        value={importRulesPreview.resourcesPerTurn.base}
+                        onChange={(e) => setImportRulesPreview({
+                          ...importRulesPreview,
+                          resourcesPerTurn: { ...importRulesPreview.resourcesPerTurn, base: parseInt(e.target.value) || 0 }
+                        })}
+                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>RAND INCOME</label>
+                      <input
+                        type="number"
+                        value={importRulesPreview.resourcesPerTurn.randomAdd}
+                        onChange={(e) => setImportRulesPreview({
+                          ...importRulesPreview,
+                          resourcesPerTurn: { ...importRulesPreview.resourcesPerTurn, randomAdd: parseInt(e.target.value) || 0 }
+                        })}
+                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(57, 255, 20, 0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(57, 255, 20, 0.08)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={importRulesPreview.nodeProduction.enabled}
+                      onChange={(e) => setImportRulesPreview({
+                        ...importRulesPreview,
+                        nodeProduction: { ...importRulesPreview.nodeProduction, enabled: e.target.checked }
+                      })}
+                      style={{ accentColor: 'var(--accent-green)' }}
+                    />
+                    <span>ENABLE AUTOMATED NODE PRODUCTION</span>
+                  </label>
+
+                  {importRulesPreview.nodeProduction.enabled && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                      <div>
+                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SHIPS PER TURN</label>
+                        <input
+                          type="number"
+                          value={importRulesPreview.nodeProduction.shipsPerTurn}
+                          onChange={(e) => setImportRulesPreview({
+                            ...importRulesPreview,
+                            nodeProduction: { ...importRulesPreview.nodeProduction, shipsPerTurn: parseInt(e.target.value) || 0 }
+                          })}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SHIP TYPE</label>
+                        <select
+                          value={importRulesPreview.nodeProduction.shipType}
+                          onChange={(e) => setImportRulesPreview({
+                            ...importRulesPreview,
+                            nodeProduction: { ...importRulesPreview.nodeProduction, shipType: e.target.value }
+                          })}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                        >
+                          {Object.keys(importRulesPreview.ships).map(type => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>NEUTRAL DEFENSE COMPOSITION</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr', gap: '8px' }}>
+                    <div>
+                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MIN SHIPS</label>
+                      <input
+                        type="number"
+                        value={importRulesPreview.neutralStartingShipsRange.min}
+                        onChange={(e) => setImportRulesPreview({
+                          ...importRulesPreview,
+                          neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, min: parseInt(e.target.value) || 0 }
+                        })}
+                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MAX SHIPS</label>
+                      <input
+                        type="number"
+                        value={importRulesPreview.neutralStartingShipsRange.max}
+                        onChange={(e) => setImportRulesPreview({
+                          ...importRulesPreview,
+                          neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, max: parseInt(e.target.value) || 0 }
+                        })}
+                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>SHIP TYPE</label>
+                      <select
+                        value={importRulesPreview.neutralStartingShipsRange.type}
+                        onChange={(e) => setImportRulesPreview({
+                          ...importRulesPreview,
+                          neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, type: e.target.value }
+                        })}
+                        style={{ width: '100%', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                      >
+                        {Object.keys(importRulesPreview.ships).map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>FACTION STARTING FLEETS</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                    {Object.keys(importRulesPreview.ships).map(type => (
+                      <div key={type}>
+                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{type.toUpperCase()}</label>
+                        <input
+                          type="number"
+                          value={importRulesPreview.startingShips[type] || 0}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setImportRulesPreview({
+                              ...importRulesPreview,
+                              startingShips: { ...importRulesPreview.startingShips, [type]: val }
+                            });
+                          }}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Ship Types Manager Section for Import Preview */}
+            <div style={{ background: 'rgba(255,255,255,0.01)', padding: '15px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '14px', color: 'var(--accent-magenta)', margin: 0 }}>SHIP TYPES SCHEMA</h3>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="e.g. Destroyer"
+                    value={newImportShipTypeKey}
+                    onChange={(e) => setNewImportShipTypeKey(e.target.value)}
+                    style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px' }}
+                  />
+                  <button
+                    className="btn-sci-fi"
+                    style={{ padding: '4px 10px', fontSize: '11px' }}
+                    onClick={() => {
+                      const key = newImportShipTypeKey.trim();
+                      if (key && !importRulesPreview.ships[key]) {
+                        const updatedShips = {
+                          ...importRulesPreview.ships,
+                          [key]: {
+                            name: key,
+                            cost: 10,
+                            speed: 3.0,
+                            hp: 1,
+                            attack: 1,
+                            hitChance: 0.5,
+                            description: 'Custom combat hull.'
+                          }
+                        };
+                        setImportRulesPreview({
+                          ...importRulesPreview,
+                          ships: updatedShips,
+                          startingShips: { ...importRulesPreview.startingShips, [key]: 0 }
+                        });
+                        setNewImportShipTypeKey('');
+                      }
+                    }}
+                  >
+                    ADD HULL TYPE
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                {Object.entries(importRulesPreview.ships).map(([type, shipDef]) => (
+                  <div key={type} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong style={{ color: 'white', fontSize: '13px' }}>Hull Protocol: {type}</strong>
+                      {Object.keys(importRulesPreview.ships).length > 1 && (
+                        <button
+                          className="btn-sci-fi btn-danger"
+                          style={{ padding: '2px 6px', fontSize: '10px' }}
+                          onClick={() => {
+                            const newShips = { ...importRulesPreview.ships };
+                            delete newShips[type];
+                            const newStarting = { ...importRulesPreview.startingShips };
+                            delete newStarting[type];
+                            
+                            let newProdType = importRulesPreview.nodeProduction.shipType;
+                            if (newProdType === type) {
+                              newProdType = Object.keys(newShips)[0] || '';
+                            }
+                            let newNeutralType = importRulesPreview.neutralStartingShipsRange.type;
+                            if (newNeutralType === type) {
+                              newNeutralType = Object.keys(newShips)[0] || '';
+                            }
+
+                            setImportRulesPreview({
+                              ...importRulesPreview,
+                              ships: newShips,
+                              startingShips: newStarting,
+                              nodeProduction: { ...importRulesPreview.nodeProduction, shipType: newProdType },
+                              neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, type: newNeutralType }
+                            });
+                          }}
+                        >
+                          REMOVE
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
+                      {importRulesPreview.enableCredits && (
+                        <div>
+                          <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>BUILD COST</label>
+                          <input
+                            type="number"
+                            value={shipDef.cost}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              setImportRulesPreview({
+                                ...importRulesPreview,
+                                ships: {
+                                  ...importRulesPreview.ships,
+                                  [type]: { ...shipDef, cost: val }
+                                }
+                              });
+                            }}
+                            style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>SPEED (LY/T)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={shipDef.speed}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0.1;
+                            setImportRulesPreview({
+                              ...importRulesPreview,
+                              ships: {
+                                ...importRulesPreview.ships,
+                                [type]: { ...shipDef, speed: val }
+                              }
+                            });
+                          }}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>STRUCTURAL HP</label>
+                        <input
+                          type="number"
+                          value={shipDef.hp}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 1;
+                            setImportRulesPreview({
+                              ...importRulesPreview,
+                              ships: {
+                                ...importRulesPreview.ships,
+                                [type]: { ...shipDef, hp: val }
+                              }
+                            });
+                          }}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>WEAPON DAMAGE</label>
+                        <input
+                          type="number"
+                          value={shipDef.attack}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setImportRulesPreview({
+                              ...importRulesPreview,
+                              ships: {
+                                ...importRulesPreview.ships,
+                                [type]: { ...shipDef, attack: val }
+                              }
+                            });
+                          }}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>HIT CHANCE (0-1)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={shipDef.hitChance}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0.0;
+                            setImportRulesPreview({
+                              ...importRulesPreview,
+                              ships: {
+                                ...importRulesPreview.ships,
+                                [type]: { ...shipDef, hitChance: val }
+                              }
+                            });
+                          }}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
+              <button className="btn-sci-fi" onClick={handleConfirmImport} style={{ flex: 1, justifyContent: 'center' }}>
+                CONFIRM IMPORT PROTOCOL
+              </button>
+              <button className="btn-sci-fi btn-danger" onClick={() => { setIsImportPreviewOpen(false); setImportRulesPreview(null); }}>
+                CANCEL
               </button>
             </div>
 
