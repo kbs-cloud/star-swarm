@@ -112,4 +112,81 @@ test.describe('Star-Swarm E2E Tests', () => {
     // Confirm again that there are no canvas or syntax errors in the console
     expect(consoleErrors).toEqual([]);
   });
+
+  test('should support Simple Mode with node production and hidden upgrades/credits', async ({ page }) => {
+    const randomEmail = `simple-commander-${Date.now()}@example.com`;
+    
+    // 1. Navigate to the local server
+    await page.goto('http://localhost:8080/');
+
+    // 2. Open auth modal and register a new commander account
+    const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
+    await establishLinkBtn.click();
+
+    const registerTab = page.locator('button:has-text("REGISTER")');
+    await registerTab.click();
+
+    const emailInput = page.locator('input[type="email"]');
+    const passwordInput = page.locator('input[type="password"]');
+    await emailInput.fill(randomEmail);
+    await passwordInput.fill('password123');
+
+    const submitBtn = page.locator('button[type="submit"]');
+    await submitBtn.click();
+
+    // Wait for registration success message to verify the tab has transitioned
+    await expect(page.locator('text=Account created successfully')).toBeVisible();
+
+    // After registration, it automatically shifts to sign in. Log in.
+    await emailInput.fill(randomEmail);
+    await passwordInput.fill('password123');
+    await submitBtn.click();
+
+    // Verify logged in
+    const logoutBtn = page.locator('button:has-text("LOG OUT")');
+    await expect(logoutBtn).toBeVisible();
+
+    // 3. Click AI Skirmish Match
+    const skirmishBtn = page.locator('button:has-text("SKIRMISH MATCH")');
+    await skirmishBtn.click();
+
+    // 4. Select Simple Mode ruleset in the dropdown
+    const modeDropdown = page.locator('select').first();
+    await modeDropdown.selectOption('simple');
+
+    // Verify description is visible
+    await expect(page.locator('text=Nodes produce ships directly')).toBeVisible();
+
+    // 5. Launch the game simulation
+    const startBtn = page.locator('button:has-text("LAUNCH GALAXY SIMULATION")');
+    await startBtn.click();
+
+    // 6. Verify Dashboard active player indicator and that credits/upgrades/global tech are hidden
+    const canvas = page.locator('canvas');
+    await expect(canvas).toBeVisible();
+    await expect(page.getByText("ACTIVE FACTION", { exact: true })).toBeVisible();
+
+    // Resource pool / CR indicator should be hidden since credits are disabled
+    await expect(page.locator('text=RESOURCE POOL')).not.toBeVisible();
+    await expect(page.locator('text=CR')).not.toBeVisible();
+
+    // Global tech and Upgrades should be hidden
+    await expect(page.locator('text=HYPERDRIVE GLOBAL TECH')).not.toBeVisible();
+    await expect(page.locator('text=UPGRADE SYSTEMS')).not.toBeVisible();
+
+    // 7. Click End Turn and verify it cycles successfully
+    const endTurnBtn = page.locator('button:has-text("END TURN")');
+    await expect(endTurnBtn).toBeVisible();
+    await endTurnBtn.click();
+
+    // Let the AI run its turn calculations and update state
+    await page.waitForTimeout(1500);
+
+    // Verify turn progresses to #2 (Vanguard turn returns after AI actions complete)
+    const nextTurnIndicator = page.locator('.telemetry:has-text("#2")');
+    await expect(nextTurnIndicator).toBeVisible();
+
+    // Confirm that there are no canvas or syntax errors in the console
+    expect(consoleErrors).toEqual([]);
+  });
 });

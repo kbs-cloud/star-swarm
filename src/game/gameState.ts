@@ -18,6 +18,34 @@ export interface UpgradeDef {
   description: string;
 }
 
+export interface GameRules {
+  id: string;
+  name: string;
+  description: string;
+  isDefault: boolean;
+  enableCredits: boolean;
+  enableUpgrades: boolean;
+  captureRequiresColonyShip: boolean;
+  startingResources: number;
+  resourcesPerTurn: {
+    base: number;
+    randomAdd: number;
+  };
+  startingShips: Record<string, number>;
+  neutralStartingShipsRange: {
+    min: number;
+    max: number;
+    type: string;
+  };
+  nodeProduction: {
+    enabled: boolean;
+    shipsPerTurn: number;
+    shipType: string;
+  };
+  ships: Record<string, ShipDef>;
+  upgrades: Record<string, UpgradeDef>;
+}
+
 export interface BuildJob {
   shipType: string;
   turnsRemaining: number;
@@ -140,6 +168,7 @@ export interface GameState {
   turnNumber: number;
   activePlayerIdx: number;
   combatLog: GameEvent[];
+  rules?: GameRules;
 }
 
 export const SHIP_TYPES: Record<string, ShipDef> = {
@@ -209,6 +238,79 @@ export const UPGRADES: Record<string, UpgradeDef> = {
   }
 };
 
+export const NORMAL_RULES: GameRules = {
+  id: 'normal',
+  name: 'Normal Mode',
+  description: 'Standard rules with shipyard queues, resource collection, and tech upgrades.',
+  isDefault: true,
+  enableCredits: true,
+  enableUpgrades: true,
+  captureRequiresColonyShip: true,
+  startingResources: 60,
+  resourcesPerTurn: {
+    base: 15,
+    randomAdd: 10
+  },
+  startingShips: {
+    Fighter: 8,
+    Cruiser: 1,
+    Scout: 2,
+    Colony: 1
+  },
+  neutralStartingShipsRange: {
+    min: 1,
+    max: 4,
+    type: 'Fighter'
+  },
+  nodeProduction: {
+    enabled: false,
+    shipsPerTurn: 0,
+    shipType: ''
+  },
+  ships: SHIP_TYPES,
+  upgrades: UPGRADES
+};
+
+export const SIMPLE_RULES: GameRules = {
+  id: 'simple',
+  name: 'Simple Mode',
+  description: 'Nodes produce ships directly. One ship type, no upgrades, and no credits.',
+  isDefault: true,
+  enableCredits: false,
+  enableUpgrades: false,
+  captureRequiresColonyShip: false,
+  startingResources: 0,
+  resourcesPerTurn: {
+    base: 0,
+    randomAdd: 0
+  },
+  startingShips: {
+    Fighter: 5
+  },
+  neutralStartingShipsRange: {
+    min: 1,
+    max: 3,
+    type: 'Fighter'
+  },
+  nodeProduction: {
+    enabled: true,
+    shipsPerTurn: 2,
+    shipType: 'Fighter'
+  },
+  ships: {
+    Fighter: {
+      name: 'Fighter',
+      cost: 0,
+      speed: 4.0,
+      hp: 1,
+      attack: 1,
+      hitChance: 0.5,
+      description: 'Basic combat unit. Captures nodes and attacks enemies.'
+    }
+  },
+  upgrades: {}
+};
+
 export const FACTION_INFO: Record<number, { name: string; color: string; team: number }> = {
   0: { name: 'Neutral / Independent', color: '#8ba2b5', team: 0 },
   1: { name: 'Vanguard Swarm', color: '#00f0ff', team: 1 },
@@ -234,7 +336,9 @@ export function initializeGame(options: {
   gridHeight?: number;
   numSystems?: number;
   players?: Player[];
+  rules?: GameRules;
 } = {}): GameState {
+  const rules = options.rules || NORMAL_RULES;
   const width = options.gridWidth || 60;
   const height = options.gridHeight || 60;
   const numSystems = options.numSystems || 16;
@@ -269,18 +373,23 @@ export function initializeGame(options: {
 
     const name = STAR_NAMES[i % STAR_NAMES.length] + (i >= STAR_NAMES.length ? ` ${Math.floor(i / STAR_NAMES.length) + 1}` : '');
     
+    const initialShips: Record<string, number> = {};
+    Object.keys(rules.ships).forEach(type => {
+      initialShips[type] = 0;
+    });
+
     systems.push({
       id: i + 1,
       name,
       x,
       y,
       owner: 0,
-      ships: { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0 },
+      ships: initialShips as any,
       shipyardLvl: 1,
       sensorLvl: 1,
       shieldsLvl: 0,
       buildQueue: [],
-      resourcesPerTurn: 15 + Math.floor(Math.random() * 11)
+      resourcesPerTurn: rules.resourcesPerTurn.base + Math.floor(Math.random() * (rules.resourcesPerTurn.randomAdd + 1))
     });
   }
 
@@ -306,16 +415,25 @@ export function initializeGame(options: {
     const sysIdx = systemIndices[idx % systemIndices.length];
     const startingSys = systems[sysIdx];
     startingSys.owner = player.id;
-    startingSys.ships = { Fighter: 8, Cruiser: 1, Scout: 2, Colony: 1 };
+    
+    const startingShips: Record<string, number> = {};
+    Object.keys(rules.ships).forEach(type => {
+      startingShips[type] = rules.startingShips[type] || 0;
+    });
+    startingSys.ships = startingShips as any;
+    
     startingSys.shipyardLvl = 1;
     startingSys.sensorLvl = 2;
-    startingSys.shieldsLvl = 1;
+    startingSys.shieldsLvl = rules.enableUpgrades ? 1 : 0;
   });
 
   systems.forEach(sys => {
     if (sys.owner === 0) {
-      sys.ships.Fighter = Math.floor(Math.random() * 4) + 1;
-      sys.ships.Cruiser = Math.random() > 0.85 ? 1 : 0;
+      const range = rules.neutralStartingShipsRange;
+      const count = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+      if (sys.ships[range.type] !== undefined) {
+        sys.ships[range.type] = count;
+      }
     }
   });
 
@@ -326,7 +444,7 @@ export function initializeGame(options: {
       name: p.name,
       type: p.type,
       team: p.team,
-      resources: 60,
+      resources: rules.startingResources,
       tech: {
         Hyperdrive: 0
       },
@@ -344,7 +462,8 @@ export function initializeGame(options: {
     playerState,
     turnNumber: 1,
     activePlayerIdx: 0,
-    combatLog: []
+    combatLog: [],
+    rules
   };
 }
 
@@ -392,8 +511,10 @@ export function computeVision(gameState: GameState, playerId: number): {
   gameState.fleets.forEach(fleet => {
     if (alliedPlayerIds.includes(fleet.owner)) {
       visibleFleets.add(fleet.id);
-      const hasScout = fleet.ships.Scout > 0;
-      const sensorRadius = hasScout ? (SHIP_TYPES.Scout.sensorRange || 12.0) : 5.0;
+      const hasScout = (fleet.ships.Scout || 0) > 0;
+      const activeRules = gameState.rules || NORMAL_RULES;
+      const scoutDef = activeRules.ships.Scout || SHIP_TYPES.Scout;
+      const sensorRadius = hasScout ? (scoutDef.sensorRange || 12.0) : 5.0;
       markCircleVisible(fleet.currentPos.x, fleet.currentPos.y, sensorRadius);
     }
   });
@@ -446,10 +567,12 @@ export function dispatchFleet(
     source.ships[shipType] -= qty;
   }
 
+  const activeRules = gameState.rules || NORMAL_RULES;
   let slowestSpeed = Infinity;
   for (const [shipType, qty] of Object.entries(shipQuantities)) {
     if (qty > 0) {
-      slowestSpeed = Math.min(slowestSpeed, SHIP_TYPES[shipType].speed);
+      const shipSpeed = activeRules.ships[shipType]?.speed || SHIP_TYPES[shipType]?.speed || 1.0;
+      slowestSpeed = Math.min(slowestSpeed, shipSpeed);
     }
   }
 
@@ -459,10 +582,15 @@ export function dispatchFleet(
   const dist = Math.sqrt((dest.x - source.x) ** 2 + (dest.y - source.y) ** 2);
   const totalTurns = Math.max(1, Math.ceil(dist / actualSpeed));
 
+  const initialFleetShips: Record<string, number> = {};
+  Object.keys(activeRules.ships).forEach(type => {
+    initialFleetShips[type] = 0;
+  });
+
   const newFleet: Fleet = {
     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
     owner: playerId,
-    ships: { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...shipQuantities },
+    ships: { ...initialFleetShips, ...shipQuantities },
     source: { x: source.x, y: source.y, name: source.name, id: source.id },
     destination: { x: dest.x, y: dest.y, name: dest.name, id: dest.id },
     currentPos: { x: source.x, y: source.y },
@@ -506,18 +634,30 @@ export function upgradeSystem(
   systemId: number,
   upgradeType: string
 ): { success: boolean; reason?: string } {
+  const activeRules = gameState.rules || NORMAL_RULES;
+  if (!activeRules.enableUpgrades) {
+    return { success: false, reason: 'Upgrades are disabled in this game mode.' };
+  }
+
   const player = gameState.playerState[playerId];
   if (!player || player.lost) return { success: false, reason: 'Player invalid.' };
 
-  if (upgradeType === 'Hyperdrive') {
-    const currentLvl = player.tech.Hyperdrive;
-    const cost = Math.round(UPGRADES.Hyperdrive.baseCost * (UPGRADES.Hyperdrive.multiplier ** currentLvl));
+  const upgrades = activeRules.upgrades || UPGRADES;
 
-    if (player.resources < cost) {
+  if (upgradeType === 'Hyperdrive') {
+    const currentLvl = player.tech.Hyperdrive || 0;
+    const upgradeDef = upgrades.Hyperdrive || UPGRADES.Hyperdrive;
+    const cost = activeRules.enableCredits
+      ? Math.round(upgradeDef.baseCost * (upgradeDef.multiplier ** currentLvl))
+      : 0;
+
+    if (activeRules.enableCredits && player.resources < cost) {
       return { success: false, reason: `Requires ${cost} resources (Have: ${player.resources}).` };
     }
 
-    player.resources -= cost;
+    if (activeRules.enableCredits) {
+      player.resources -= cost;
+    }
     player.tech.Hyperdrive += 1;
     return { success: true };
   }
@@ -541,13 +681,18 @@ export function upgradeSystem(
     return { success: false, reason: 'Unknown upgrade type.' };
   }
 
-  const cost = Math.round(UPGRADES[upgradeType].baseCost * (UPGRADES[upgradeType].multiplier ** (currentLvl - (upgradeType === 'Shields' ? 0 : 1))));
+  const upgradeDef = upgrades[upgradeType] || UPGRADES[upgradeType];
+  const cost = activeRules.enableCredits
+    ? Math.round(upgradeDef.baseCost * (upgradeDef.multiplier ** (currentLvl - (upgradeType === 'Shields' ? 0 : 1))))
+    : 0;
 
-  if (player.resources < cost) {
+  if (activeRules.enableCredits && player.resources < cost) {
     return { success: false, reason: `Requires ${cost} resources (Have: ${player.resources}).` };
   }
 
-  player.resources -= cost;
+  if (activeRules.enableCredits) {
+    player.resources -= cost;
+  }
   sys[prop] += 1;
 
   return { success: true };
@@ -559,10 +704,15 @@ export function queueShipProduction(
   systemId: number,
   shipType: string
 ): { success: boolean; reason?: string } {
+  const activeRules = gameState.rules || NORMAL_RULES;
+  if (activeRules.nodeProduction?.enabled) {
+    return { success: false, reason: 'Manual ship production is disabled in this mode. Nodes produce ships automatically.' };
+  }
+
   const sys = gameState.systems.find(s => s.id === systemId);
   if (!sys || sys.owner !== playerId) return { success: false, reason: 'System not owned.' };
 
-  const shipDef = SHIP_TYPES[shipType];
+  const shipDef = activeRules.ships[shipType] || SHIP_TYPES[shipType];
   if (!shipDef) return { success: false, reason: 'Unknown ship type.' };
 
   const maxQueue = sys.shipyardLvl + 1;
@@ -571,11 +721,14 @@ export function queueShipProduction(
   }
 
   const player = gameState.playerState[playerId];
-  if (player.resources < shipDef.cost) {
-    return { success: false, reason: `Insufficient funds. Ship costs ${shipDef.cost}.` };
+  const cost = activeRules.enableCredits ? shipDef.cost : 0;
+  if (activeRules.enableCredits && player.resources < cost) {
+    return { success: false, reason: `Insufficient funds. Ship costs ${cost}.` };
   }
 
-  player.resources -= shipDef.cost;
+  if (activeRules.enableCredits) {
+    player.resources -= cost;
+  }
 
   let buildTime = 1;
   if (shipType === 'Colony') buildTime = 2;
@@ -598,15 +751,16 @@ export function resolveCombat(
   defenderId: number,
   attackerShips: Record<string, number>,
   defenderShips: Record<string, number>,
-  defenderShieldsLvl = 0
+  defenderShieldsLvl = 0,
+  shipDefs: Record<string, ShipDef> = SHIP_TYPES
 ): CombatReport {
   const log: CombatRound[] = [];
-  const startAttacker = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...attackerShips };
-  const startDefender = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...defenderShips };
+  const startAttacker = { ...attackerShips };
+  const startDefender = { ...defenderShips };
 
   let round = 1;
-  const aShips = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...attackerShips };
-  const dShips = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...defenderShips };
+  const aShips = { ...attackerShips };
+  const dShips = { ...defenderShips };
 
   while (
     Object.values(aShips).reduce((a, b) => a + b, 0) > 0 &&
@@ -618,7 +772,8 @@ export function resolveCombat(
 
     for (const [type, qty] of Object.entries(aShips)) {
       if (qty <= 0) continue;
-      const def = SHIP_TYPES[type];
+      const def = shipDefs[type] || SHIP_TYPES[type];
+      if (!def) continue;
       for (let i = 0; i < qty; i++) {
         if (Math.random() < def.hitChance) {
           attackerHits += def.attack;
@@ -628,7 +783,8 @@ export function resolveCombat(
 
     for (const [type, qty] of Object.entries(dShips)) {
       if (qty <= 0) continue;
-      const def = SHIP_TYPES[type];
+      const def = shipDefs[type] || SHIP_TYPES[type];
+      if (!def) continue;
       for (let i = 0; i < qty; i++) {
         if (Math.random() < def.hitChance) {
           defenderHits += def.attack;
@@ -643,11 +799,17 @@ export function resolveCombat(
 
     const applyDamage = (ships: Record<string, number>, damage: number) => {
       let dmgLeft = damage;
-      const order = ['Fighter', 'Scout', 'Colony', 'Cruiser'];
+      // Sort ship types by HP (ascending) so fragile ships take damage first
+      const order = Object.keys(ships).sort((a, b) => {
+        const hpA = (shipDefs[a] || SHIP_TYPES[a])?.hp || 1;
+        const hpB = (shipDefs[b] || SHIP_TYPES[b])?.hp || 1;
+        return hpA - hpB;
+      });
       
       for (const type of order) {
         if ((ships[type] || 0) <= 0 || dmgLeft <= 0) continue;
-        const hp = SHIP_TYPES[type].hp;
+        const def = shipDefs[type] || SHIP_TYPES[type];
+        const hp = def ? def.hp : 1;
         
         const potentialKills = Math.floor(dmgLeft / hp);
         const actualKills = Math.min(ships[type], potentialKills);
@@ -693,29 +855,46 @@ export function resolveCombat(
 
 export function processTurnEnd(gameState: GameState): void {
   const newCombatLogs: GameEvent[] = [];
+  const activeRules = gameState.rules || NORMAL_RULES;
 
-  gameState.systems.forEach(sys => {
-    if (sys.owner === 0) return;
-
-    if (sys.buildQueue && sys.buildQueue.length > 0) {
-      const currentJob = sys.buildQueue[0];
-      currentJob.turnsRemaining -= 1;
-
-      if (currentJob.turnsRemaining <= 0) {
-        sys.ships[currentJob.shipType] = (sys.ships[currentJob.shipType] || 0) + 1;
-        sys.buildQueue.shift();
+  // 1. Process automated node production or manual build queues
+  if (activeRules.nodeProduction?.enabled) {
+    const prod = activeRules.nodeProduction;
+    gameState.systems.forEach(sys => {
+      if (sys.owner !== 0) {
+        const player = gameState.playerState[sys.owner];
+        if (player && !player.lost) {
+          sys.ships[prod.shipType] = (sys.ships[prod.shipType] || 0) + prod.shipsPerTurn;
+        }
       }
-    }
-  });
+    });
+  } else {
+    gameState.systems.forEach(sys => {
+      if (sys.owner === 0) return;
 
-  gameState.systems.forEach(sys => {
-    if (sys.owner !== 0) {
-      const player = gameState.playerState[sys.owner];
-      if (player && !player.lost) {
-        player.resources += sys.resourcesPerTurn;
+      if (sys.buildQueue && sys.buildQueue.length > 0) {
+        const currentJob = sys.buildQueue[0];
+        currentJob.turnsRemaining -= 1;
+
+        if (currentJob.turnsRemaining <= 0) {
+          sys.ships[currentJob.shipType] = (sys.ships[currentJob.shipType] || 0) + 1;
+          sys.buildQueue.shift();
+        }
       }
-    }
-  });
+    });
+  }
+
+  // 2. Collect resources (only if credits are enabled)
+  if (activeRules.enableCredits) {
+    gameState.systems.forEach(sys => {
+      if (sys.owner !== 0) {
+        const player = gameState.playerState[sys.owner];
+        if (player && !player.lost) {
+          player.resources += sys.resourcesPerTurn;
+        }
+      }
+    });
+  }
 
   const survivingFleets: Fleet[] = [];
   
@@ -767,7 +946,8 @@ export function processTurnEnd(gameState: GameState): void {
           system.owner,
           fleet.ships,
           system.ships,
-          system.owner === 0 ? 0 : system.shieldsLvl
+          system.owner === 0 ? 0 : system.shieldsLvl,
+          activeRules.ships
         );
 
         newCombatLogs.push({
@@ -779,15 +959,23 @@ export function processTurnEnd(gameState: GameState): void {
           results: battle
         });
 
-        system.ships = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...battle.endDefender };
+        const emptyShips: Record<string, number> = {};
+        Object.keys(activeRules.ships).forEach(type => {
+          emptyShips[type] = 0;
+        });
+
+        system.ships = { ...emptyShips, ...battle.endDefender } as any;
 
         if (battle.winner === fleet.owner) {
           const hasColony = (battle.endAttacker.Colony || 0) > 0;
+          const canCapture = !activeRules.captureRequiresColonyShip || hasColony;
 
-          if (hasColony) {
+          if (canCapture) {
             system.owner = fleet.owner;
-            system.ships = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...battle.endAttacker };
-            system.ships.Colony = Math.max(0, system.ships.Colony - 1);
+            system.ships = { ...emptyShips, ...battle.endAttacker } as any;
+            if (activeRules.captureRequiresColonyShip) {
+              system.ships.Colony = Math.max(0, (system.ships.Colony || 0) - 1);
+            }
             
             system.shipyardLvl = Math.max(1, system.shipyardLvl - 1);
             system.sensorLvl = Math.max(1, system.sensorLvl - 1);
@@ -796,7 +984,7 @@ export function processTurnEnd(gameState: GameState): void {
             system.buildQueue = [];
           } else {
             system.owner = 0;
-            system.ships = { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0 };
+            system.ships = { ...emptyShips } as any;
             
             if (Object.values(battle.endAttacker).reduce((a,b)=>a+b, 0) > 0) {
               const returnSpeed = fleet.speed;
@@ -806,7 +994,7 @@ export function processTurnEnd(gameState: GameState): void {
               const returnFleet: Fleet = {
                 id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                 owner: fleet.owner,
-                ships: { Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0, ...battle.endAttacker },
+                ships: { ...emptyShips, ...battle.endAttacker } as any,
                 source: { x: system.x, y: system.y, name: system.name, id: system.id },
                 destination: { x: fleet.source.x, y: fleet.source.y, name: fleet.source.name, id: fleet.source.id },
                 currentPos: { x: system.x, y: system.y },
@@ -886,8 +1074,9 @@ export function cancelProduction(
   }
   
   const job = sys.buildQueue[jobIndex];
-  const shipDef = SHIP_TYPES[job.shipType];
-  if (shipDef) {
+  const activeRules = gameState.rules || NORMAL_RULES;
+  const shipDef = activeRules.ships[job.shipType] || SHIP_TYPES[job.shipType];
+  if (shipDef && activeRules.enableCredits) {
     gameState.playerState[playerId].resources += shipDef.cost;
   }
   

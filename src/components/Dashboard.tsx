@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player } from '../game/gameState';
+import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player, NORMAL_RULES } from '../game/gameState';
 
 interface DashboardProps {
   gameState: GameState;
@@ -55,17 +55,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const activePlayer = gameState.playerState[activePlayerId];
   const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId) || null;
   const selectedFleet = gameState.fleets.find(f => f.id === selectedFleetId) || null;
+  const activeRules = gameState.rules || NORMAL_RULES;
 
   const activePlayerSlot = gameState.players[gameState.activePlayerIdx];
   const isMyTurn = activePlayerSlot && isPlayerLocalToClient(activePlayerSlot);
 
   // State for dispatch quantities
-  const [dispatchQty, setDispatchQty] = useState<Record<string, number>>({
-    Fighter: 0,
-    Cruiser: 0,
-    Scout: 0,
-    Colony: 0
-  });
+  const [dispatchQty, setDispatchQty] = useState<Record<string, number>>({});
+
+  // Reset dispatch quantities when selected system, target system, or active rules change
+  React.useEffect(() => {
+    const initialQty: Record<string, number> = {};
+    const shipTypes = gameState.rules?.ships || SHIP_TYPES;
+    Object.keys(shipTypes).forEach(type => {
+      initialQty[type] = 0;
+    });
+    setDispatchQty(initialQty);
+  }, [selectedSystemId, targetSystem?.id, gameState.rules]);
 
   // State for active combat log expanded index
   const [selectedBattleLogIndex, setSelectedBattleLogIndex] = useState<number | null>(null);
@@ -101,13 +107,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const executeDispatch = () => {
     if (!targetSystem) return;
     onDispatchFleet(targetSystem.id, dispatchQty);
-    setDispatchQty({ Fighter: 0, Cruiser: 0, Scout: 0, Colony: 0 });
+    const resetQty: Record<string, number> = {};
+    const shipTypes = gameState.rules?.ships || SHIP_TYPES;
+    Object.keys(shipTypes).forEach(type => {
+      resetQty[type] = 0;
+    });
+    setDispatchQty(resetQty);
     setTargetSystem(null);
   };
 
   // Get Upgrade Resource Cost calculation
   const getUpgradeCost = (type: string, sys?: StarSystem) => {
-    const def = UPGRADES[type];
+    const activeRules = gameState.rules || NORMAL_RULES;
+    const upgrades = activeRules.upgrades || UPGRADES;
+    const def = upgrades[type];
     if (!def) return 0;
     if (type === 'Hyperdrive') {
       const hyperLvl = activePlayer.tech.Hyperdrive || 0;
@@ -307,31 +320,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
           
-          <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+          {activeRules.enableCredits && (
+            <>
+              <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>RESOURCE POOL</div>
+                <div className="telemetry" style={{ fontSize: '20px', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                  {activePlayer.resources} CR
+                </div>
+              </div>
+            </>
+          )}
 
-          <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>RESOURCE POOL</div>
-            <div className="telemetry" style={{ fontSize: '20px', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-              {activePlayer.resources} CR
-            </div>
-          </div>
-
-          <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
-
-          <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>HYPERDRIVE GLOBAL TECH</div>
-            <div className="telemetry" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              LVL {activePlayer.tech.Hyperdrive || 0}
-              <button
-                className="btn-sci-fi"
-                style={{ padding: '2px 8px', fontSize: '10px' }}
-                onClick={() => onUpgradeSystem('Hyperdrive')}
-                disabled={activePlayer.resources < getUpgradeCost('Hyperdrive')}
-              >
-                UPGRADE ({getUpgradeCost('Hyperdrive')} CR)
-              </button>
-            </div>
-          </div>
+          {activeRules.enableUpgrades && (
+            <>
+              <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>HYPERDRIVE GLOBAL TECH</div>
+                <div className="telemetry" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  LVL {activePlayer.tech.Hyperdrive || 0}
+                  <button
+                    className="btn-sci-fi"
+                    style={{ padding: '2px 8px', fontSize: '10px' }}
+                    onClick={() => onUpgradeSystem('Hyperdrive')}
+                    disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Hyperdrive')}
+                  >
+                    UPGRADE {activeRules.enableCredits ? `(${getUpgradeCost('Hyperdrive')} CR)` : ''}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -380,7 +399,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ fontSize: '13px', color: selectedSystem.owner === 0 ? '#8ba2b5' : (gameState.playerState[selectedSystem.owner]?.color || '#ffffff'), marginBottom: '4px' }}>
               Owner: <strong>{selectedSystem.owner === 0 ? 'Neutral / Independent' : (gameState.playerState[selectedSystem.owner]?.name || 'Unknown')}</strong>
             </div>
-            {selectedSystem.owner !== 0 && (
+            {activeRules.enableCredits && selectedSystem.owner !== 0 && (
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                 Generates +{selectedSystem.resourcesPerTurn} resources/turn
               </div>
@@ -433,120 +452,126 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {isMySystem && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                     {/* PRODUCTION QUEUE */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                        <span>Shipyard Queue</span>
-                        <span className="telemetry" style={{ color: 'var(--accent-green)' }}>{selectedSystem.buildQueue.length} / {maxBuildCapacity}</span>
-                      </div>
-                      
-                      {selectedSystem.buildQueue.length > 0 ? (
-                        <div style={{
-                          background: 'rgba(57, 255, 20, 0.05)',
-                          border: '1px solid rgba(57, 255, 20, 0.2)',
-                          padding: '10px',
-                          borderRadius: '6px',
-                          marginBottom: '10px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
-                        }}>
-                          {selectedSystem.buildQueue.map((job, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                              <span>{idx === 0 ? '[CURRENT] ' : ''}{job.shipType}</span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span className="telemetry" style={{ color: 'var(--accent-green)' }}>
-                                  {job.turnsRemaining} {job.turnsRemaining === 1 ? 'Turn' : 'Turns'} left
-                                </span>
-                                <button
-                                  className="btn-sci-fi btn-danger"
-                                  style={{ padding: '0 4px', fontSize: '8px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onCancelProduction(selectedSystem.id, idx);
-                                  }}
-                                >
-                                  ✕
-                                </button>
+                    {!activeRules.nodeProduction?.enabled && (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                          <span>Shipyard Queue</span>
+                          <span className="telemetry" style={{ color: 'var(--accent-green)' }}>{selectedSystem.buildQueue.length} / {maxBuildCapacity}</span>
+                        </div>
+                        
+                        {selectedSystem.buildQueue.length > 0 ? (
+                          <div style={{
+                            background: 'rgba(57, 255, 20, 0.05)',
+                            border: '1px solid rgba(57, 255, 20, 0.2)',
+                            padding: '10px',
+                            borderRadius: '6px',
+                            marginBottom: '10px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px'
+                          }}>
+                            {selectedSystem.buildQueue.map((job, idx) => (
+                              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                                <span>{idx === 0 ? '[CURRENT] ' : ''}{job.shipType}</span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="telemetry" style={{ color: 'var(--accent-green)' }}>
+                                    {job.turnsRemaining} {job.turnsRemaining === 1 ? 'Turn' : 'Turns'} left
+                                  </span>
+                                  <button
+                                    className="btn-sci-fi btn-danger"
+                                    style={{ padding: '0 4px', fontSize: '8px' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onCancelProduction(selectedSystem.id, idx);
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
                               </div>
-                            </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic', marginBottom: '10px' }}>
+                            Production yards idle.
+                          </div>
+                        )}
+
+                        {/* Add Ship buttons */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                          {Object.entries(activeRules.ships).map(([type, def]) => (
+                            <button
+                              key={type}
+                              className="btn-sci-fi"
+                              style={{ padding: '6px 8px', fontSize: '11px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+                              onClick={() => onQueueShip(type)}
+                              disabled={(activeRules.enableCredits && activePlayer.resources < def.cost) || selectedSystem.buildQueue.length >= maxBuildCapacity}
+                            >
+                              <span style={{ fontWeight: 'bold' }}>+ {type}</span>
+                              {activeRules.enableCredits && (
+                                <span className="telemetry" style={{ fontSize: '10px', opacity: 0.8 }}>({def.cost} CR)</span>
+                              )}
+                            </button>
                           ))}
                         </div>
-                      ) : (
-                        <div style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic', marginBottom: '10px' }}>
-                          Production yards idle.
-                        </div>
-                      )}
-
-                      {/* Add Ship buttons */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        {Object.entries(SHIP_TYPES).map(([type, def]) => (
-                          <button
-                            key={type}
-                            className="btn-sci-fi"
-                            style={{ padding: '6px 8px', fontSize: '11px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
-                            onClick={() => onQueueShip(type)}
-                            disabled={activePlayer.resources < def.cost || selectedSystem.buildQueue.length >= maxBuildCapacity}
-                          >
-                            <span style={{ fontWeight: 'bold' }}>+ {type}</span>
-                            <span className="telemetry" style={{ fontSize: '10px', opacity: 0.8 }}>({def.cost} CR)</span>
-                          </button>
-                        ))}
                       </div>
-                    </div>
+                    )}
 
                     {/* UPGRADE INFRASTRUCTURE */}
-                    <div>
-                      <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-primary)' }}>UPGRADE SYSTEMS</h3>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {/* SHIPYARD */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                          <div>
-                            <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Shipyard (LVL {selectedSystem.shipyardLvl})</span>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand build limit & reduce times</div>
+                    {activeRules.enableUpgrades && (
+                      <div>
+                        <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-primary)' }}>UPGRADE SYSTEMS</h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {/* SHIPYARD */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Shipyard (LVL {selectedSystem.shipyardLvl})</span>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand build limit & reduce times</div>
+                            </div>
+                            <button
+                              className="btn-sci-fi"
+                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              onClick={() => onUpgradeSystem('Shipyard', selectedSystem.id)}
+                              disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Shipyard', selectedSystem)}
+                            >
+                              {getUpgradeCost('Shipyard', selectedSystem)}{activeRules.enableCredits ? ' CR' : ''}
+                            </button>
                           </div>
-                          <button
-                            className="btn-sci-fi"
-                            style={{ padding: '4px 10px', fontSize: '11px' }}
-                            onClick={() => onUpgradeSystem('Shipyard', selectedSystem.id)}
-                            disabled={activePlayer.resources < getUpgradeCost('Shipyard', selectedSystem)}
-                          >
-                            {getUpgradeCost('Shipyard', selectedSystem)} CR
-                          </button>
-                        </div>
 
-                        {/* SENSORS */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                          <div>
-                            <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Sensors (LVL {selectedSystem.sensorLvl})</span>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand map scanner range</div>
+                          {/* SENSORS */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Sensors (LVL {selectedSystem.sensorLvl})</span>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand map scanner range</div>
+                            </div>
+                            <button
+                              className="btn-sci-fi"
+                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              onClick={() => onUpgradeSystem('Sensors', selectedSystem.id)}
+                              disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Sensors', selectedSystem)}
+                            >
+                              {getUpgradeCost('Sensors', selectedSystem)}{activeRules.enableCredits ? ' CR' : ''}
+                            </button>
                           </div>
-                          <button
-                            className="btn-sci-fi"
-                            style={{ padding: '4px 10px', fontSize: '11px' }}
-                            onClick={() => onUpgradeSystem('Sensors', selectedSystem.id)}
-                            disabled={activePlayer.resources < getUpgradeCost('Sensors', selectedSystem)}
-                          >
-                            {getUpgradeCost('Sensors', selectedSystem)} CR
-                          </button>
-                        </div>
 
-                        {/* SHIELDS */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                          <div>
-                            <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Shields (LVL {selectedSystem.shieldsLvl})</span>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Absorbs combat damage</div>
+                          {/* SHIELDS */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Shields (LVL {selectedSystem.shieldsLvl})</span>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Absorbs combat damage</div>
+                            </div>
+                            <button
+                              className="btn-sci-fi"
+                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              onClick={() => onUpgradeSystem('Shields', selectedSystem.id)}
+                              disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Shields', selectedSystem)}
+                            >
+                              {getUpgradeCost('Shields', selectedSystem)}{activeRules.enableCredits ? ' CR' : ''}
+                            </button>
                           </div>
-                          <button
-                            className="btn-sci-fi"
-                            style={{ padding: '4px 10px', fontSize: '11px' }}
-                            onClick={() => onUpgradeSystem('Shields', selectedSystem.id)}
-                            disabled={activePlayer.resources < getUpgradeCost('Shields', selectedSystem)}
-                          >
-                            {getUpgradeCost('Shields', selectedSystem)} CR
-                          </button>
                         </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </>
@@ -685,7 +710,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
                           <span>Defense: {Object.entries(sys.ships).map(([t, q]) => q > 0 ? `${t.substring(0,2)}:${q}` : '').filter(Boolean).join(', ') || 'None'}</span>
-                          <span className="telemetry" style={{ color: 'var(--accent-green)' }}>+{sys.resourcesPerTurn} CR</span>
+                          {activeRules.enableCredits && (
+                            <span className="telemetry" style={{ color: 'var(--accent-green)' }}>+{sys.resourcesPerTurn} CR</span>
+                          )}
                         </div>
                       </div>
                     ))
@@ -907,7 +934,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {Object.keys(SHIP_TYPES).map(shipType => {
+                  {Object.keys(activeRules.ships).map(shipType => {
                     const availableQty = selectedSystem.ships[shipType] || 0;
                     return (
                       <div key={shipType} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
