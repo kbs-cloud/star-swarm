@@ -12,14 +12,17 @@ function getHeaders(): Record<string, string> {
 
 export interface GameMetadata {
   id: string;
+  invite_code?: string;
   name: string;
   game_state?: any;
   created_at: string;
   updated_at: string;
+  owner_email?: string;
 }
 
 export interface GameDetails {
   id: string;
+  inviteCode?: string;
   ownerEmail: string;
   name: string;
   gameState: GameState;
@@ -47,17 +50,40 @@ export async function updateSettings(displayName: string): Promise<{ success: bo
   }
 }
 
+export interface GameListParams {
+  search?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  turns?: string;
+  limit: number;
+  offset: number;
+}
+
 /**
- * Lists all game simulations owned by the active logged in commander.
+ * Lists all game simulations owned by or participating the active logged in commander.
  */
-export async function listGames(): Promise<{ success: boolean; games?: GameMetadata[]; error?: string }> {
+export async function listGames(params?: GameListParams): Promise<{ success: boolean; games?: GameMetadata[]; totalCount?: number; error?: string }> {
   try {
-    const response = await fetch('/api/games', {
+    let url = '/api/games';
+    if (params) {
+      const searchParams = new URLSearchParams();
+      if (params.search) searchParams.append('search', params.search);
+      if (params.status) searchParams.append('status', params.status);
+      if (params.startDate) searchParams.append('startDate', params.startDate);
+      if (params.endDate) searchParams.append('endDate', params.endDate);
+      if (params.turns) searchParams.append('turns', params.turns);
+      searchParams.append('limit', String(params.limit));
+      searchParams.append('offset', String(params.offset));
+      url += `?${searchParams.toString()}`;
+    }
+
+    const response = await fetch(url, {
       headers: getHeaders()
     });
     const data = await response.json();
     if (response.ok && data.success) {
-      return { success: true, games: data.games };
+      return { success: true, games: data.games, totalCount: data.totalCount };
     }
     return { success: false, error: data.error || 'Failed to list saved games.' };
   } catch (e) {
@@ -68,7 +94,7 @@ export async function listGames(): Promise<{ success: boolean; games?: GameMetad
 /**
  * Registers a new game state on the database.
  */
-export async function createGame(name: string, gameState: GameState): Promise<{ success: boolean; gameId?: string; name?: string; error?: string }> {
+export async function createGame(name: string, gameState: GameState): Promise<{ success: boolean; gameId?: string; inviteCode?: string; name?: string; error?: string }> {
   try {
     const response = await fetch('/api/games', {
       method: 'POST',
@@ -77,7 +103,7 @@ export async function createGame(name: string, gameState: GameState): Promise<{ 
     });
     const data = await response.json();
     if (response.ok && data.success) {
-      return { success: true, gameId: data.gameId, name: data.name };
+      return { success: true, gameId: data.gameId, inviteCode: data.inviteCode, name: data.name };
     }
     return { success: false, error: data.error || 'Failed to create game session.' };
   } catch (e) {
@@ -156,6 +182,122 @@ export async function deleteGame(id: string): Promise<{ success: boolean; error?
       return { success: true };
     }
     return { success: false, error: data.error || 'Failed to decommission game.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+export async function assignPlayerSlot(
+  gameId: string,
+  playerId: number,
+  email: string,
+  joinRequestId?: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${gameId}/assign-slot`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ playerId, email, joinRequestId })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Failed to assign player slot.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+export interface JoinRequest {
+  id: number;
+  email: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+}
+
+/**
+ * Player submits a request to join a game they don't own.
+ * One pending request per player per game is enforced server-side.
+ */
+export async function requestToJoin(gameId: string): Promise<{ success: boolean; joinId?: number; token?: string; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${gameId}/join`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true, joinId: data.joinId, token: data.token };
+    }
+    return { success: false, error: data.error || 'Failed to submit join request.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+/**
+ * Host fetches all pending join requests for their game.
+ */
+export async function fetchPendingJoins(gameId: string): Promise<{ success: boolean; requests?: JoinRequest[]; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${gameId}/join-requests`, {
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true, requests: data.requests };
+    }
+    return { success: false, error: data.error || 'Failed to fetch join requests.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+/**
+ * Player polls this to find out if their join request was accepted or rejected.
+ */
+export async function checkMyJoinStatus(gameId: string): Promise<{ success: boolean; status?: 'pending' | 'accepted' | 'rejected' | null; joinId?: number; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${gameId}/my-join-status`, {
+      headers: getHeaders()
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true, status: data.status, joinId: data.joinId };
+    }
+    return { success: false, error: data.error || 'Failed to check join status.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+/**
+ * Host accepts a join request and assigns the player to a faction slot.
+ */
+export async function acceptJoinRequest(
+  gameId: string,
+  joinRequestId: number,
+  playerId: number,
+  email: string
+): Promise<{ success: boolean; error?: string }> {
+  return assignPlayerSlot(gameId, playerId, email, joinRequestId);
+}
+
+/**
+ * Host rejects a pending join request.
+ */
+export async function rejectJoinRequest(gameId: string, joinRequestId: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${gameId}/reject-join`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ joinRequestId })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Failed to reject join request.' };
   } catch (e) {
     return { success: false, error: 'Server connection failed.' };
   }

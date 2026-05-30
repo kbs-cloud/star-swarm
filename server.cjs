@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.BACKEND_PORT || process.env.PORT || 3001;
 
 // Database Connection
 const dbPath = path.join(__dirname, 'starswarm.db');
@@ -50,6 +50,7 @@ function initializeTables() {
     db.run(`
       CREATE TABLE IF NOT EXISTS games (
         id TEXT PRIMARY KEY,
+        invite_code TEXT UNIQUE,
         owner_email TEXT,
         name TEXT,
         game_state TEXT,
@@ -59,12 +60,106 @@ function initializeTables() {
       )
     `);
 
-    // Add optional display_name column to users table dynamically if it does not exist
+    // Add optional display_name column to users table dynamically if it does not exist.
     db.run("ALTER TABLE users ADD COLUMN display_name TEXT", (err) => {
       if (err && !err.message.includes('duplicate column name')) {
         console.warn('Optional display_name column creation info:', err.message);
       }
     });
+
+    // Add optional invite_code column to games table dynamically if it does not exist.
+    db.run("ALTER TABLE games ADD COLUMN invite_code TEXT", (err) => {
+      if (err && !err.message.includes('duplicate column name')) {
+        console.warn('Optional invite_code column creation info:', err.message);
+      }
+      db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_games_invite_code ON games(invite_code)", (idxErr) => {
+        if (idxErr) {
+          console.warn('Failed to create unique index on invite_code:', idxErr.message);
+        }
+        // Populate missing invite codes for existing games
+        populateMissingInviteCodes();
+      });
+    });
+
+    // Migrate join_requests: drop old table if it exists (may have wrong constraint)
+    // and recreate with UNIQUE(game_id, email) so status is updated in place.
+    db.run(`DROP TABLE IF EXISTS join_requests`, (dropErr) => {
+      if (dropErr) console.error('join_requests drop error:', dropErr.message);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS join_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          game_id TEXT NOT NULL,
+          email TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected')) DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(game_id, email) ON CONFLICT REPLACE
+        )
+      `, (createErr) => {
+        if (createErr) console.error('join_requests create error:', createErr.message);
+      });
+    });
+  });
+}
+
+// Helper: encode a positive integer to base-62 string (dynamic length, collision-free)
+const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+function encodeBase62(num) {
+  if (num === 0) return '0';
+  let s = '';
+  while (num > 0) {
+    s = BASE62[num % 62] + s;
+    num = Math.floor(num / 62);
+  }
+  return s;
+}
+
+// Helper: generate a random invite code using base-62 character set
+function generateInviteCode() {
+  const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const bytes = crypto.randomBytes(8);
+  let result = '';
+  for (let i = 0; i < 8; i++) {
+    result += chars[bytes[i] % 62];
+  }
+  return result;
+}
+
+// Generate a unique invite code checking against the database
+function generateUniqueInviteCode(callback) {
+  const code = generateInviteCode();
+  db.get('SELECT id FROM games WHERE invite_code = ?', [code], (err, row) => {
+    if (err) {
+      return callback(null, err);
+    }
+    if (row) {
+      return generateUniqueInviteCode(callback);
+    }
+    callback(code);
+  });
+}
+
+// Populate missing invite codes for existing games (e.g. from migrations)
+function populateMissingInviteCodes() {
+  db.all('SELECT id FROM games WHERE invite_code IS NULL', [], (err, rows) => {
+    if (err || !rows || rows.length === 0) return;
+    
+    let processed = 0;
+    const updateNext = () => {
+      if (processed >= rows.length) return;
+      const row = rows[processed];
+      generateUniqueInviteCode((code, codeErr) => {
+        if (code && !codeErr) {
+          db.run('UPDATE games SET invite_code = ? WHERE id = ?', [code, row.id], (updErr) => {
+            processed++;
+            updateNext();
+          });
+        } else {
+          processed++;
+          updateNext();
+        }
+      });
+    };
+    updateNext();
   });
 }
 
@@ -167,6 +262,27 @@ function getPresence(gameId) {
   return list.filter(item => now - item.lastSeen < 10000).map(item => item.email);
 }
 
+
+// Resolve 'id' and 'gameId' parameters to the actual UUID if they are invite codes
+app.param('id', (req, res, next, id) => {
+  db.get('SELECT id FROM games WHERE id = ? OR invite_code = ?', [id, id], (err, row) => {
+    if (err) return next(err);
+    if (row) {
+      req.params.id = row.id;
+    }
+    next();
+  });
+});
+
+app.param('gameId', (req, res, next, gameId) => {
+  db.get('SELECT id FROM games WHERE id = ? OR invite_code = ?', [gameId, gameId], (err, row) => {
+    if (err) return next(err);
+    if (row) {
+      req.params.gameId = row.id;
+    }
+    next();
+  });
+});
 
 // Endpoint: Register new user
 app.post('/api/register', validateCSRF, (req, res) => {
@@ -415,21 +531,136 @@ app.post('/api/logout', (req, res) => {
   res.status(200).json({ success: true, message: 'Logged out successfully.' });
 });
 
-// Endpoint: List active games for logged in user
+// Helper to compute turn status on backend for filtering
+function getGameTurnStatus(gameState, ownerEmail, currentUserEmail) {
+  if (!gameState || !gameState.players || !gameState.playerState) return 'UNKNOWN';
+
+  const activeTeams = new Set();
+  gameState.players.forEach(p => {
+    const pState = gameState.playerState[p.id];
+    if (pState && !pState.lost) {
+      activeTeams.add(p.team);
+    }
+  });
+  if (activeTeams.size <= 1) {
+    return 'GAME OVER';
+  }
+
+  const activeHumans = gameState.players.filter(p => p.type === 'human' && !gameState.playerState[p.id]?.lost);
+  const userPlayer = activeHumans.find(p => p.assignedEmail === currentUserEmail || (p.id === 1 && p.isLocal && ownerEmail === currentUserEmail));
+
+  if (gameState.turnStyle === 'sequential') {
+    const activePlayer = gameState.players[gameState.activePlayerIdx];
+    if (userPlayer && activePlayer && activePlayer.id === userPlayer.id) {
+      return 'YOUR TURN';
+    }
+    if (activePlayer) {
+      return `WAITING ON: ${activePlayer.name.toUpperCase()}`;
+    }
+    return 'PROCESSING TURN...';
+  }
+
+  if (userPlayer && !userPlayer.endedTurn) {
+    return 'YOUR TURN';
+  }
+
+  const pendingPlayers = activeHumans.filter(p => !p.endedTurn);
+  if (pendingPlayers.length === 1) {
+    return `WAITING ON: ${pendingPlayers[0].name.toUpperCase()}`;
+  } else if (pendingPlayers.length > 1) {
+    return 'WAITING ON OTHER PLAYERS';
+  }
+
+  return 'PROCESSING TURN...';
+}
+
+// Endpoint: List active games for logged in user with search, filtering, and pagination
 app.get('/api/games', (req, res) => {
   getSessionUser(req, (err, user) => {
     if (err || !user) {
       return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
     }
+
+    const { search, status, startDate, endDate, turns, limit, offset } = req.query;
+
     db.all(
-      'SELECT id, name, game_state, created_at, updated_at FROM games WHERE owner_email = ? ORDER BY updated_at DESC',
-      [user.email],
+      'SELECT id, invite_code, owner_email, name, game_state, created_at, updated_at FROM games WHERE owner_email = ? OR game_state LIKE ? ORDER BY updated_at DESC',
+      [user.email, '%"assignedEmail":"' + user.email + '"%'],
       (queryErr, rows) => {
         if (queryErr) {
           console.error('Error fetching games:', queryErr.message);
           return res.status(500).json({ error: 'Failed to fetch saved games.' });
         }
-        res.status(200).json({ success: true, games: rows });
+
+        // Filter games in memory
+        const filteredGames = rows.filter(row => {
+          let parsedState;
+          try {
+            parsedState = typeof row.game_state === 'string' ? JSON.parse(row.game_state) : row.game_state;
+          } catch (e) {
+            return false;
+          }
+
+          // Search term filter: matches game name, owner email, or any player's name or email
+          if (search) {
+            const sLower = search.toLowerCase();
+            const matchesName = row.name && row.name.toLowerCase().includes(sLower);
+            const matchesOwner = row.owner_email && row.owner_email.toLowerCase().includes(sLower);
+            const matchesPlayers = parsedState.players && parsedState.players.some(p => 
+              (p.name && p.name.toLowerCase().includes(sLower)) ||
+              (p.assignedEmail && p.assignedEmail.toLowerCase().includes(sLower))
+            );
+            if (!matchesName && !matchesOwner && !matchesPlayers) {
+              return false;
+            }
+          }
+
+          // Status filter: "your_turn", "waiting", "game_over"
+          if (status && status !== 'all') {
+            const turnStatus = getGameTurnStatus(parsedState, row.owner_email, user.email);
+            if (status === 'your_turn') {
+              if (turnStatus !== 'YOUR TURN') return false;
+            } else if (status === 'waiting') {
+              if (!turnStatus.startsWith('WAITING ON') && turnStatus !== 'WAITING ON OTHER PLAYERS') return false;
+            } else if (status === 'game_over') {
+              if (turnStatus !== 'GAME OVER') return false;
+            }
+          }
+
+          // Date filters on updated_at
+          if (startDate) {
+            const start = new Date(startDate);
+            const gameDate = new Date(row.updated_at);
+            if (gameDate < start) return false;
+          }
+          if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            const gameDate = new Date(row.updated_at);
+            if (gameDate > end) return false;
+          }
+
+          // Turns filter
+          if (turns) {
+            const turnNum = parseInt(turns);
+            if (!isNaN(turnNum) && parsedState.turnNumber !== turnNum) {
+              return false;
+            }
+          }
+
+          return true;
+        });
+
+        // Paginate
+        const limitNum = parseInt(limit) || 10;
+        const offsetNum = parseInt(offset) || 0;
+        const paginatedGames = filteredGames.slice(offsetNum, offsetNum + limitNum);
+
+        res.status(200).json({
+          success: true,
+          games: paginatedGames,
+          totalCount: filteredGames.length
+        });
       }
     );
   });
@@ -452,22 +683,29 @@ app.post('/api/games', validateCSRF, (req, res) => {
     
     const gameId = crypto.randomUUID();
     
-    db.run(
-      'INSERT INTO games (id, owner_email, name, game_state) VALUES (?, ?, ?, ?)',
-      [gameId, user.email, name.trim(), gameStateStr],
-      function (insertErr) {
-        if (insertErr) {
-          console.error('Error creating game:', insertErr.message);
-          return res.status(500).json({ error: 'Failed to create game session.' });
-        }
-        res.status(201).json({
-          success: true,
-          gameId,
-          name: name.trim(),
-          message: 'Game simulation saved to database.'
-        });
+    generateUniqueInviteCode((inviteCode, codeErr) => {
+      if (codeErr || !inviteCode) {
+        return res.status(500).json({ error: 'Failed to generate invite code.' });
       }
-    );
+      
+      db.run(
+        'INSERT INTO games (id, invite_code, owner_email, name, game_state) VALUES (?, ?, ?, ?, ?)',
+        [gameId, inviteCode, user.email, name.trim(), gameStateStr],
+        function (insertErr) {
+          if (insertErr) {
+            console.error('Error creating game:', insertErr.message);
+            return res.status(500).json({ error: 'Failed to create game session.' });
+          }
+          res.status(201).json({
+            success: true,
+            gameId,
+            inviteCode,
+            name: name.trim(),
+            message: 'Game simulation saved to database.'
+          });
+        }
+      );
+    });
   });
 });
 
@@ -479,7 +717,7 @@ app.get('/api/games/:id', (req, res) => {
     }
     const gameId = req.params.id;
     db.get(
-      'SELECT id, owner_email, name, game_state, created_at, updated_at FROM games WHERE id = ?',
+      'SELECT id, invite_code, owner_email, name, game_state, created_at, updated_at FROM games WHERE id = ?',
       [gameId],
       (queryErr, row) => {
         if (queryErr) {
@@ -505,6 +743,7 @@ app.get('/api/games/:id', (req, res) => {
           connectedPlayers: connected,
           game: {
             id: row.id,
+            inviteCode: row.invite_code,
             ownerEmail: row.owner_email,
             name: row.name,
             gameState: parsedState,
@@ -601,6 +840,214 @@ app.delete('/api/games/:id', validateCSRF, (req, res) => {
         }
         res.status(200).json({ success: true, message: 'Game decommissioned successfully.' });
       });
+    });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// JOIN REQUEST FLOW
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/games/:gameId/join
+ * Player submits a join request for the given game.
+ * One pending request per player per game is enforced (UNIQUE on game_id, email).
+ * Returns the join request id and a compact base-62 token.
+ */
+app.post('/api/games/:gameId/join', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
+    const { gameId } = req.params;
+
+    // Verify the game exists
+    db.get('SELECT id, owner_email FROM games WHERE id = ?', [gameId], (findErr, game) => {
+      if (findErr) return res.status(500).json({ error: 'Database error.' });
+      if (!game) return res.status(404).json({ error: 'Game not found.' });
+      if (game.owner_email === user.email) {
+        return res.status(400).json({ error: 'You are the host of this game.' });
+      }
+
+      // Upsert: UNIQUE(game_id, email) ON CONFLICT REPLACE resets the row
+      db.run(
+        `INSERT OR REPLACE INTO join_requests (game_id, email, status)
+         VALUES (?, ?, 'pending')`,
+        [gameId, user.email],
+        function (insertErr) {
+          if (insertErr) {
+            console.error('join_requests insert error:', insertErr.message);
+            return res.status(500).json({ error: 'Failed to submit join request.' });
+          }
+          const joinId = this.lastID;
+          const token = encodeBase62(joinId);
+          res.status(201).json({ success: true, joinId, token });
+        }
+      );
+    });
+  });
+});
+
+/**
+ * GET /api/games/:gameId/join-requests
+ * Host fetches all pending join requests for their game.
+ */
+app.get('/api/games/:gameId/join-requests', (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
+    const { gameId } = req.params;
+
+    db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, game) => {
+      if (findErr) return res.status(500).json({ error: 'Database error.' });
+      if (!game) return res.status(404).json({ error: 'Game not found.' });
+      if (game.owner_email !== user.email) {
+        return res.status(403).json({ error: 'Only the game host can view join requests.' });
+      }
+
+      db.all(
+        `SELECT id, email, status, created_at FROM join_requests
+         WHERE game_id = ? AND status = 'pending'
+         ORDER BY created_at ASC`,
+        [gameId],
+        (queryErr, rows) => {
+          if (queryErr) return res.status(500).json({ error: 'Failed to fetch join requests.' });
+          res.status(200).json({ success: true, requests: rows || [] });
+        }
+      );
+    });
+  });
+});
+
+/**
+ * GET /api/games/:gameId/my-join-status
+ * Player polls this to find out if their request was accepted or rejected.
+ */
+app.get('/api/games/:gameId/my-join-status', (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
+    const { gameId } = req.params;
+
+    db.get(
+      `SELECT id, status FROM join_requests WHERE game_id = ? AND email = ?`,
+      [gameId, user.email],
+      (queryErr, row) => {
+        if (queryErr) return res.status(500).json({ error: 'Database error.' });
+        if (!row) return res.status(200).json({ success: true, status: null });
+        res.status(200).json({ success: true, status: row.status, joinId: row.id });
+      }
+    );
+  });
+});
+
+/**
+ * POST /api/games/:gameId/assign-slot
+ * Host accepts a join request and assigns the player to a faction slot.
+ * Body: { joinRequestId, playerId, email }
+ */
+app.post('/api/games/:gameId/assign-slot', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
+    const { gameId } = req.params;
+    const { joinRequestId, playerId, email } = req.body;
+
+    if (!playerId || !email) {
+      return res.status(400).json({ error: 'playerId and email are required.' });
+    }
+
+    db.get('SELECT owner_email, game_state FROM games WHERE id = ?', [gameId], (findErr, game) => {
+      if (findErr) return res.status(500).json({ error: 'Database error.' });
+      if (!game) return res.status(404).json({ error: 'Game not found.' });
+      if (game.owner_email !== user.email) {
+        return res.status(403).json({ error: 'Only the game host can assign slots.' });
+      }
+
+      // Verify the join request is pending (if an id is provided)
+      const afterVerify = () => {
+        let parsedState;
+        try { parsedState = JSON.parse(game.game_state); } catch (e) {
+          return res.status(500).json({ error: 'Game state corruption.' });
+        }
+
+        const player = parsedState.players.find(p => p.id === Number(playerId));
+        if (!player) return res.status(404).json({ error: 'Player slot not found.' });
+        if (player.assignedEmail) {
+          return res.status(400).json({ error: 'That slot is already taken.' });
+        }
+
+        player.assignedEmail = email.trim().toLowerCase();
+        player.isLocal = false;
+
+        const newStateStr = JSON.stringify(parsedState);
+        const now = new Date().toISOString();
+        db.run(
+          'UPDATE games SET game_state = ?, updated_at = ? WHERE id = ?',
+          [newStateStr, now, gameId],
+          (updateErr) => {
+            if (updateErr) return res.status(500).json({ error: 'Failed to update game state.' });
+
+            // Mark the join request as accepted
+            if (joinRequestId) {
+              db.run(
+                `UPDATE join_requests SET status = 'accepted' WHERE id = ? AND game_id = ?`,
+                [joinRequestId, gameId]
+              );
+            } else {
+              // Accept by email if no specific request id given
+              db.run(
+                `UPDATE join_requests SET status = 'accepted' WHERE game_id = ? AND email = ?`,
+                [gameId, email.trim().toLowerCase()]
+              );
+            }
+
+            res.status(200).json({ success: true, message: 'Player assigned to slot successfully.' });
+          }
+        );
+      };
+
+      if (joinRequestId) {
+        db.get(
+          `SELECT status, email FROM join_requests WHERE id = ? AND game_id = ?`,
+          [joinRequestId, gameId],
+          (reqErr, reqRow) => {
+            if (reqErr || !reqRow) return res.status(404).json({ error: 'Join request not found.' });
+            if (reqRow.status !== 'pending') return res.status(400).json({ error: 'Join request is no longer pending.' });
+            afterVerify();
+          }
+        );
+      } else {
+        afterVerify();
+      }
+    });
+  });
+});
+
+/**
+ * POST /api/games/:gameId/reject-join
+ * Host rejects a pending join request.
+ * Body: { joinRequestId }
+ */
+app.post('/api/games/:gameId/reject-join', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
+    const { gameId } = req.params;
+    const { joinRequestId } = req.body;
+
+    if (!joinRequestId) return res.status(400).json({ error: 'joinRequestId is required.' });
+
+    db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, game) => {
+      if (findErr) return res.status(500).json({ error: 'Database error.' });
+      if (!game) return res.status(404).json({ error: 'Game not found.' });
+      if (game.owner_email !== user.email) {
+        return res.status(403).json({ error: 'Only the game host can reject join requests.' });
+      }
+
+      db.run(
+        `UPDATE join_requests SET status = 'rejected' WHERE id = ? AND game_id = ? AND status = 'pending'`,
+        [joinRequestId, gameId],
+        function (updateErr) {
+          if (updateErr) return res.status(500).json({ error: 'Failed to reject join request.' });
+          if (this.changes === 0) return res.status(404).json({ error: 'Pending join request not found.' });
+          res.status(200).json({ success: true, message: 'Join request rejected.' });
+        }
+      );
     });
   });
 });

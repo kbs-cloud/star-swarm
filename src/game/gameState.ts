@@ -170,6 +170,7 @@ export interface GameState {
   activePlayerIdx: number;
   combatLog: GameEvent[];
   rules?: GameRules;
+  turnStyle?: 'simultaneous' | 'sequential';
 }
 
 export const SHIP_TYPES: Record<string, ShipDef> = {
@@ -340,6 +341,7 @@ export function initializeGame(options: {
   numSystems?: number;
   players?: Player[];
   rules?: GameRules;
+  turnStyle?: 'simultaneous' | 'sequential';
 } = {}): GameState {
   const rules = options.rules || NORMAL_RULES;
   const width = options.gridWidth || 60;
@@ -466,7 +468,8 @@ export function initializeGame(options: {
     turnNumber: 1,
     activePlayerIdx: 0,
     combatLog: [],
-    rules
+    rules,
+    turnStyle: options.turnStyle || 'simultaneous'
   };
 }
 

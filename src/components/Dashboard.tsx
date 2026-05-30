@@ -63,8 +63,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const selectedFleet = gameState.fleets.find(f => f.id === selectedFleetId) || null;
   const activeRules = gameState.rules || NORMAL_RULES;
 
-  const activePlayerSlot = gameState.players[gameState.activePlayerIdx];
-  const isMyTurn = activePlayerSlot && isPlayerLocalToClient(activePlayerSlot);
+  const activePlayerSlot = gameState.players.find(p => p.id === activePlayerId) || gameState.players[gameState.activePlayerIdx];
+  const isMyTurn = activePlayerSlot && isPlayerLocalToClient(activePlayerSlot) && !activePlayerSlot.endedTurn;
 
   // State for dispatch quantities
   const [dispatchQty, setDispatchQty] = useState<Record<string, number>>({});
@@ -77,7 +77,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       initialQty[type] = 0;
     });
     setDispatchQty(initialQty);
-  }, [selectedSystemId, targetSystem?.id, gameState.rules]);
+  }, [selectedSystemId, targetSystem?.id, gameState.rules?.id]);
 
   // State for active combat log expanded index
   const [selectedBattleLogIndex, setSelectedBattleLogIndex] = useState<number | null>(null);
@@ -312,9 +312,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
         pointerEvents: 'auto'
       }} className="glass-panel glass-panel-neon-cyan">
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          {/* MY FACTION IDENTITY — always shows who THIS logged-in user is */}
+          {(() => {
+            // First try exact email match, then fall back to isLocal flag for host
+            const myPlayer = gameState.players.find(p => p.assignedEmail === currentUserEmail)
+              || (gameOwnerEmail === currentUserEmail ? gameState.players.find(p => p.isLocal) : undefined);
+            const myState = myPlayer ? gameState.playerState[myPlayer.id] : null;
+            const dotColor = myPlayer?.color || myState?.color || '#888';
+            return (
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '2px' }}>
+                  COMMANDER
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {myPlayer ? (
+                    <>
+                      <span style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        background: dotColor,
+                        display: 'inline-block',
+                        boxShadow: `0 0 6px ${dotColor}`
+                      }} />
+                      <span style={{ color: 'white' }}>{myPlayer.name}</span>
+                      {myState && !myState.lost && activeRules.enableCredits && (
+                        <span style={{ fontSize: '12px', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono', marginLeft: '4px' }}>
+                          {myState.resources} CR
+                        </span>
+                      )}
+                      {myState?.lost && (
+                        <span style={{ fontSize: '10px', color: 'var(--accent-magenta)', fontFamily: 'Share Tech Mono' }}>[ELIMINATED]</span>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Observer</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.15)' }} />
+
+          {/* ACTIVE FACTION — whose turn it currently is */}
           <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ACTIVE FACTION</div>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '2px' }}>
+              {isMyTurn ? '▶ YOUR TURN' : 'ACTIVE FACTION'}
+            </div>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{
                 width: '10px',
                 height: '10px',
@@ -322,23 +368,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 background: activePlayer.color || '#ffffff',
                 display: 'inline-block'
               }} />
-              {activePlayer.name}
+              <span style={{ color: isMyTurn ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
+                {activePlayer.name}
+              </span>
             </div>
           </div>
           
-          {activeRules.enableCredits && (
-            <>
-              <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
-              <div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>RESOURCE POOL</div>
-                <div className="telemetry" style={{ fontSize: '20px', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                  {activePlayer.resources} CR
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeRules.enableUpgrades && (
+          {activeRules.enableUpgrades && isMyTurn && (
             <>
               <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
               <div>
@@ -367,7 +403,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: '12px 18px', fontWeight: 'bold' }}>
             HOME
           </button>
-          <button className="btn-sci-fi pulse-light" onClick={onEndTurn} style={{ padding: '12px 24px', fontWeight: 'bold' }}>
+          <button
+            className={`btn-sci-fi ${isMyTurn && !(activePlayerSlot && activePlayerSlot.endedTurn) ? 'pulse-light' : ''}`}
+            onClick={onEndTurn}
+            style={{ padding: '12px 24px', fontWeight: 'bold' }}
+            disabled={!isMyTurn || !!(activePlayerSlot && activePlayerSlot.endedTurn)}
+          >
             END TURN
           </button>
         </div>
@@ -1194,18 +1235,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </h2>
             <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
               We are currently awaiting tactical data submissions from:
-              <div style={{
-                fontSize: '22px',
-                fontWeight: 'bold',
-                color: activePlayerSlot.color || 'white',
-                marginTop: '10px',
-                textShadow: `0 0 10px ${activePlayerSlot.color || '#fff'}`
-              }}>
-                {activePlayerSlot.name}
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                ({activePlayerSlot.assignedEmail || 'Unassigned Link'})
-              </div>
+              {gameState.turnStyle === 'sequential' ? (
+                <>
+                  <div style={{
+                    fontSize: '22px',
+                    fontWeight: 'bold',
+                    color: activePlayerSlot.color || 'white',
+                    marginTop: '10px',
+                    textShadow: `0 0 10px ${activePlayerSlot.color || '#fff'}`
+                  }}>
+                    {activePlayerSlot.name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    ({activePlayerSlot.assignedEmail || 'Unassigned Link'})
+                  </div>
+                </>
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  marginTop: '10px',
+                  alignItems: 'center'
+                }}>
+                  {gameState.players
+                    .filter(p => p.type === 'human' && !gameState.playerState[p.id]?.lost && !p.endedTurn)
+                    .map(p => (
+                      <div key={p.id} style={{
+                        fontSize: '20px',
+                        fontWeight: 'bold',
+                        color: p.color || 'white',
+                        textShadow: `0 0 10px ${p.color || '#fff'}`
+                      }}>
+                        {p.name} {p.assignedEmail ? `(${p.assignedEmail})` : '(Local)'}
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
 
             <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
@@ -1241,7 +1307,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               const myPlayer = gameState.players.find(p => p.assignedEmail === currentUserEmail || (p.id === 1 && isPlayerLocalToClient(p)));
               const activeHumans = gameState.players.filter(p => p.type === 'human' && !gameState.playerState[p.id]?.lost);
               const othersPending = activeHumans.some(p => p.id !== myPlayer?.id && !p.endedTurn);
-              if (myPlayer && myPlayer.endedTurn && othersPending && onCancelEndTurn) {
+              if (myPlayer && myPlayer.endedTurn && othersPending && onCancelEndTurn && gameState.turnStyle !== 'sequential') {
                 return (
                   <div style={{ width: '100%' }}>
                     <button
