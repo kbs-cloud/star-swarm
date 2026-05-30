@@ -7,6 +7,19 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
 
+const {
+  initializeGame,
+  queueShipProduction,
+  upgradeSystem,
+  dispatchFleet,
+  recallFleet,
+  cancelDispatch,
+  cancelProduction,
+  processTurnEnd,
+  logAction
+} = require('./src/game/dist/gameState.js');
+const { runAITurn } = require('./src/game/dist/ai.js');
+
 const app = express();
 const PORT = process.env.BACKEND_PORT || process.env.PORT || 3001;
 
@@ -762,14 +775,26 @@ app.get('/api/games', (req, res) => {
 // Endpoint: Create a new game entry in DB
 app.post('/api/games', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    const { name, game_state } = req.body;
+    const { name, game_state, setupOptions } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: 'Invalid game name.' });
     }
-    if (!game_state) {
-      return res.status(400).json({ error: 'Missing game state.' });
+    
+    let stateToSave;
+    if (setupOptions) {
+      try {
+        stateToSave = initializeGame(setupOptions);
+      } catch (initErr) {
+        console.error('Failed to initialize game on server:', initErr);
+        return res.status(500).json({ error: 'Failed to initialize game state.' });
+      }
+    } else if (game_state) {
+      stateToSave = game_state;
+    } else {
+      return res.status(400).json({ error: 'Missing game state or setup options.' });
     }
-    const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
+
+    const gameStateStr = typeof stateToSave === 'string' ? stateToSave : JSON.stringify(stateToSave);
     
     const gameId = crypto.randomUUID();
     
@@ -854,8 +879,11 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
     const gameId = req.params.id;
     const { game_state, name } = req.body;
-    if (!game_state && !name) {
-      return res.status(400).json({ error: 'Missing game state or name for update.' });
+    if (game_state) {
+      return res.status(403).json({ error: 'Direct state updates are restricted. All game actions must run on the server side.' });
+    }
+    if (!name) {
+      return res.status(400).json({ error: 'Missing name for update.' });
     }
     
     db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
@@ -869,12 +897,6 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
       const now = new Date().toISOString();
       const fields = [];
       const params = [];
-      
-      if (game_state) {
-        const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
-        fields.push('game_state = ?');
-        params.push(gameStateStr);
-      }
       
       if (name && typeof name === 'string' && name.trim().length > 0) {
         fields.push('name = ?');
@@ -903,6 +925,254 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
             success: true,
             connectedPlayers: getPresence(gameId),
             message: 'Game updated successfully.'
+          });
+        }
+      );
+    });
+  });
+});
+
+// Helper functions for server-side turn & game resolution
+function checkGameOver(state) {
+  const activeTeams = new Set();
+  state.players.forEach(p => {
+    const pState = state.playerState[p.id];
+    if (pState && !pState.lost) {
+      activeTeams.add(p.team);
+    }
+  });
+  return activeTeams.size <= 1;
+}
+
+function advanceSequentialTurns(state) {
+  if (state.turnStyle !== 'sequential') return;
+
+  let roundInProgress = true;
+  while (roundInProgress) {
+    if (checkGameOver(state)) {
+      break;
+    }
+
+    // 1. Check if the current active player is an AI and needs to play
+    const activePlayer = state.players[state.activePlayerIdx];
+    if (activePlayer && activePlayer.type === 'ai' && !state.playerState[activePlayer.id].lost && !activePlayer.endedTurn) {
+      runAITurn(state, activePlayer.id);
+      activePlayer.endedTurn = true;
+    }
+
+    // 2. Check if all active players (both human and AI) have ended their turns
+    const activePlayers = state.players.filter(p => !state.playerState[p.id].lost);
+    const allActiveEnded = activePlayers.every(p => p.endedTurn);
+
+    if (allActiveEnded) {
+      // Roll over round
+      processTurnEnd(state);
+
+      // Reset endedTurn flags for all players for the new round
+      state.players.forEach(p => {
+        p.endedTurn = false;
+      });
+
+      // Set active player back to the first active player (human or AI)
+      const firstActive = state.players.find(p => !state.playerState[p.id].lost);
+      if (firstActive) {
+        state.activePlayerIdx = state.players.indexOf(firstActive);
+      } else {
+        break;
+      }
+    } else {
+      // If current active player has ended their turn, transition to the next player in order
+      const currentActive = state.players[state.activePlayerIdx];
+      if (currentActive && currentActive.endedTurn) {
+        let nextIdx = state.activePlayerIdx;
+        let foundNext = false;
+        for (let i = 0; i < state.players.length; i++) {
+          nextIdx = (nextIdx + 1) % state.players.length;
+          const p = state.players[nextIdx];
+          if (!state.playerState[p.id].lost && !p.endedTurn) {
+            state.activePlayerIdx = nextIdx;
+            foundNext = true;
+            break;
+          }
+        }
+        if (!foundNext) {
+          break;
+        }
+      } else {
+        // Active player is human and hasn't ended their turn. Wait for user input.
+        roundInProgress = false;
+      }
+    }
+  }
+}
+
+// Endpoint: Process game action securely on server side
+app.post('/api/games/:id/action', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    const gameId = req.params.id;
+    const { action, playerId, params } = req.body;
+    
+    if (!action || playerId === undefined) {
+      return res.status(400).json({ error: 'Missing action or playerId.' });
+    }
+
+    db.get('SELECT owner_email, game_state FROM games WHERE id = ?', [gameId], (findErr, row) => {
+      if (findErr) return res.status(500).json({ error: 'Database error.' });
+      if (!row) return res.status(404).json({ error: 'Game not found.' });
+
+      let gameState;
+      try {
+        gameState = JSON.parse(row.game_state);
+      } catch (parseErr) {
+        return res.status(500).json({ error: 'Game state corruption.' });
+      }
+
+      const email = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
+      const normalizedEmail = email ? email.trim().toLowerCase() : null;
+
+      const player = gameState.players.find(p => p.id === Number(playerId));
+      if (!player) return res.status(404).json({ error: 'Player slot not found.' });
+
+      const isOwner = !row.owner_email || (normalizedEmail && row.owner_email.trim().toLowerCase() === normalizedEmail);
+      const isAssigned = normalizedEmail && player.assignedEmail && player.assignedEmail.trim().toLowerCase() === normalizedEmail;
+      const isAuthorized = isAssigned || (player.isLocal && isOwner);
+
+      // Perform action-specific validations and operations
+      let result = { success: false, reason: 'Unknown action' };
+
+      if (action === 'claim_faction') {
+        if (!normalizedEmail) {
+          return res.status(400).json({ error: 'Commander link identity required.' });
+        }
+        if (player.type === 'human') {
+          // If already claimed by someone else, block
+          if (player.assignedEmail && player.assignedEmail.trim().toLowerCase() !== normalizedEmail) {
+            return res.status(403).json({ error: 'Faction already claimed.' });
+          }
+          player.assignedEmail = normalizedEmail;
+          player.isLocal = true;
+          result = { success: true };
+        } else {
+          result = { success: false, reason: 'Cannot claim non-human slot.' };
+        }
+      } else if (action === 'toggle_player_local') {
+        const isMe = normalizedEmail && player.assignedEmail?.trim().toLowerCase() === normalizedEmail;
+        if (!isOwner && !isMe) {
+          return res.status(403).json({ error: 'Unauthorized to toggle local status.' });
+        }
+        if (player.type === 'human') {
+          player.isLocal = !player.isLocal;
+          result = { success: true };
+        } else {
+          result = { success: false, reason: 'Slot is not a human player.' };
+        }
+      } else if (action === 'assign_player_email') {
+        if (!isOwner) {
+          return res.status(403).json({ error: 'Only game owner can assign player emails.' });
+        }
+        if (player.type === 'human') {
+          player.assignedEmail = (params && params.email) ? params.email.trim().toLowerCase() : null;
+          result = { success: true };
+        } else {
+          result = { success: false, reason: 'Slot is not a human player.' };
+        }
+      } else {
+        // All gameplay moves require authorization
+        if (!isAuthorized) {
+          return res.status(403).json({ error: 'Unauthorized command code for this faction.' });
+        }
+
+        switch (action) {
+          case 'dispatch_fleet':
+            result = dispatchFleet(gameState, player.id, params.sourceSysId, params.destSysId, params.shipQuantities);
+            break;
+          case 'recall_fleet':
+            result = recallFleet(gameState, player.id, params.fleetId);
+            break;
+          case 'upgrade_system':
+            result = upgradeSystem(gameState, player.id, params.systemId, params.upgradeType);
+            break;
+          case 'queue_production':
+            result = queueShipProduction(gameState, player.id, params.systemId, params.shipType);
+            break;
+          case 'cancel_dispatch':
+            result = cancelDispatch(gameState, player.id, params.fleetId);
+            break;
+          case 'cancel_production':
+            result = cancelProduction(gameState, player.id, params.systemId, params.jobIndex);
+            break;
+          case 'end_turn':
+            player.endedTurn = true;
+            logAction(gameState, player.id, 'end_turn', 'Submitted orders / ended turn');
+
+            if (gameState.turnStyle === 'sequential') {
+              advanceSequentialTurns(gameState);
+            } else {
+              const activeHumans = gameState.players.filter(p => p.type === 'human' && !gameState.playerState[p.id].lost);
+              const allEnded = activeHumans.every(p => p.endedTurn);
+
+              if (allEnded) {
+                processTurnEnd(gameState);
+                gameState.players.forEach(p => {
+                  if (p.type === 'ai' && !gameState.playerState[p.id].lost) {
+                    runAITurn(gameState, p.id);
+                  }
+                });
+                gameState.players.forEach(p => {
+                  p.endedTurn = false;
+                });
+                const firstActiveHuman = gameState.players.find(p => p.type === 'human' && !gameState.playerState[p.id].lost);
+                if (firstActiveHuman) {
+                  gameState.activePlayerIdx = gameState.players.indexOf(firstActiveHuman);
+                }
+              } else {
+                let nextIdx = gameState.activePlayerIdx;
+                for (let i = 0; i < gameState.players.length; i++) {
+                  nextIdx = (nextIdx + 1) % gameState.players.length;
+                  const p = gameState.players[nextIdx];
+                  if (p.type === 'human' && !gameState.playerState[p.id].lost && !p.endedTurn) {
+                    gameState.activePlayerIdx = nextIdx;
+                    break;
+                  }
+                }
+              }
+            }
+            result = { success: true };
+            break;
+          case 'cancel_end_turn':
+            player.endedTurn = false;
+            logAction(gameState, player.id, 'cancel_end_turn', 'Resumed orders (cancelled end turn)');
+            gameState.activePlayerIdx = gameState.players.indexOf(player);
+            result = { success: true };
+            break;
+          default:
+            return res.status(400).json({ error: `Unsupported action: ${action}` });
+        }
+      }
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.reason || 'Action failed.' });
+      }
+
+      // Save updated state and return it
+      const newStateStr = JSON.stringify(gameState);
+      const now = new Date().toISOString();
+      db.run(
+        'UPDATE games SET game_state = ?, updated_at = ? WHERE id = ?',
+        [newStateStr, now, gameId],
+        (updateErr) => {
+          if (updateErr) {
+            console.error('Action state save error:', updateErr.message);
+            return res.status(500).json({ error: 'Failed to save updated state.' });
+          }
+          const presenceEmail = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
+          if (presenceEmail) {
+            updatePresence(gameId, presenceEmail);
+          }
+          res.status(200).json({
+            success: true,
+            gameState,
+            connectedPlayers: getPresence(gameId)
           });
         }
       );

@@ -122,12 +122,22 @@ export async function listGames(params?: GameListParams): Promise<{ success: boo
 /**
  * Registers a new game state on the database.
  */
-export async function createGame(name: string, gameState: GameState): Promise<{ success: boolean; gameId?: string; inviteCode?: string; name?: string; error?: string }> {
+export async function createGame(
+  name: string,
+  gameState?: GameState | null,
+  setupOptions?: any
+): Promise<{ success: boolean; gameId?: string; inviteCode?: string; name?: string; error?: string }> {
   try {
+    const body: any = { name };
+    if (setupOptions) {
+      body.setupOptions = setupOptions;
+    } else if (gameState) {
+      body.game_state = gameState;
+    }
     const response = await fetch('/api/games', {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ name, game_state: gameState })
+      body: JSON.stringify(body)
     });
     const data = await response.json();
     if (response.ok && data.success) {
@@ -351,6 +361,28 @@ export async function rejectJoinRequest(gameId: string, joinRequestId: number): 
       return { success: true };
     }
     return { success: false, error: data.error || 'Failed to reject join request.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+export async function performGameAction(
+  gameId: string,
+  action: string,
+  playerId: number,
+  params: any = {}
+): Promise<{ success: boolean; gameState?: GameState; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${gameId}/action`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ action, playerId, params })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true, gameState: data.gameState };
+    }
+    return { success: false, error: data.error || 'Action failed.' };
   } catch (e) {
     return { success: false, error: 'Server connection failed.' };
   }

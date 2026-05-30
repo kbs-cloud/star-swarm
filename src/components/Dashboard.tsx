@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player, NORMAL_RULES, ActionLogEntry } from '../game/gameState';
+import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player, NORMAL_RULES } from '../game/gameState';
 
 interface DashboardProps {
   gameState: GameState;

@@ -1,23 +1,14 @@
 import React, { useState } from 'react';
 import {
   initializeGame,
-  processTurnEnd,
-  dispatchFleet,
-  recallFleet,
-  upgradeSystem,
-  queueShipProduction,
-  cancelDispatch,
-  cancelProduction,
   GameState,
   StarSystem,
   FACTION_INFO,
   Player,
   GameRules,
   NORMAL_RULES,
-  SIMPLE_RULES,
-  logAction
+  SIMPLE_RULES
 } from './game/gameState';
-import { runAITurn } from './game/ai';
 import { StarMap } from './components/StarMap';
 import { Dashboard } from './components/Dashboard';
 import {
@@ -46,7 +37,8 @@ import {
   checkMyJoinStatus,
   acceptJoinRequest,
   rejectJoinRequest,
-  JoinRequest
+  JoinRequest,
+  performGameAction
 } from './game/gameApi';
 
 type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings';
@@ -169,7 +161,6 @@ export default function App() {
   const [customGoogleEmail, setCustomGoogleEmail] = useState('');
 
   const [settingsDisplayName, setSettingsDisplayName] = useState<string>('');
-  const [settingsCurrentPassword, setSettingsCurrentPassword] = useState<string>('');
   const [settingsNewPassword, setSettingsNewPassword] = useState<string>('');
   const [settingsConfirmPassword, setSettingsConfirmPassword] = useState<string>('');
   const [passwordStatusMessage, setPasswordStatusMessage] = useState<string | null>(null);
@@ -181,7 +172,6 @@ export default function App() {
     } else {
       setSettingsDisplayName(localStorage.getItem('starswarm_display_name') || '');
     }
-    setSettingsCurrentPassword('');
     setSettingsNewPassword('');
     setSettingsConfirmPassword('');
     setPasswordStatusMessage(null);
@@ -211,6 +201,29 @@ export default function App() {
     setToastType(type);
     setTimeout(() => setToastMsg(null), durationMs);
   };
+
+  // Turn-start & production notifications
+  interface GameNotification {
+    id: string;
+    message: string;
+    type: 'turn_start' | 'production' | 'info' | 'success' | 'warning';
+    systemId?: number;
+    createdAt: number;
+  }
+  const [notifications, setNotifications] = useState<GameNotification[]>([]);
+  const prevGameStateRef = React.useRef<GameState | null>(null);
+
+  const dismissNotification = (id: string, systemId?: number) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    if (systemId !== undefined && gameState) {
+      const sys = gameState.systems.find(s => s.id === systemId);
+      if (sys) {
+        setSelectedSystemId(systemId);
+        setCenterOnCoords({ x: sys.x, y: sys.y, trigger: Date.now() });
+      }
+    }
+  };
+
 
   // Guest Name State
   const [guestName, setGuestName] = useState<string>(() => localStorage.getItem('starswarm_guest_name') || '');
@@ -449,7 +462,6 @@ export default function App() {
       showToast('Password updated successfully. Re-authenticating...', 'success');
 
       // Clear password fields
-      setSettingsCurrentPassword('');
       setSettingsNewPassword('');
       setSettingsConfirmPassword('');
 
@@ -494,38 +506,27 @@ export default function App() {
   };
 
   // Helper: Cancel end turn inside the active game
-  const handleCancelEndTurn = (playerId: number) => {
-    if (!gameState) return;
-    const stateCopy = { ...gameState };
-    const player = stateCopy.players.find(p => p.id === playerId);
-    if (player) {
-      player.endedTurn = false;
-      logAction(stateCopy, playerId, 'cancel_end_turn', 'Resumed orders (cancelled end turn)');
-      stateCopy.activePlayerIdx = stateCopy.players.indexOf(player);
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+  const handleCancelEndTurn = async (playerId: number) => {
+    if (!gameState || !activeGameId) return;
+    const res = await performGameAction(activeGameId, 'cancel_end_turn', playerId);
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
       setScreen('game');
+    } else {
+      showError(res.error || 'Failed to cancel end turn.');
     }
   };
 
   // Helper: Cancel end turn directly from game card on home screen
   const handleCancelEndTurnForGame = async (gameId: string, playerId: number) => {
-    const res = await getGame(gameId);
-    if (res.success && res.game) {
-      const stateCopy = res.game.gameState;
-      const player = stateCopy.players.find(p => p.id === playerId);
-      if (player) {
-        player.endedTurn = false;
-        logAction(stateCopy, playerId, 'cancel_end_turn', 'Resumed orders (cancelled end turn)');
-        stateCopy.activePlayerIdx = stateCopy.players.indexOf(player);
-        const updateRes = await updateGame(gameId, stateCopy);
-        if (updateRes.success) {
-          const gamesRes = await listGames();
-          if (gamesRes.success && gamesRes.games) {
-            setSavedGames(gamesRes.games);
-          }
-        }
+    const res = await performGameAction(gameId, 'cancel_end_turn', playerId);
+    if (res.success && res.gameState) {
+      const gamesRes = await listGames();
+      if (gamesRes.success && gamesRes.games) {
+        setSavedGames(gamesRes.games);
       }
+    } else {
+      showError(res.error || 'Failed to cancel end turn.');
     }
   };
 
@@ -701,6 +702,86 @@ export default function App() {
       clearInterval(interval);
     };
   }, [activeGameId, screen, currentUser, gameOwnerEmail]);
+
+  // Monitor turn transitions and planet production completions
+  React.useEffect(() => {
+    if (!gameState || screen !== 'game') {
+      prevGameStateRef.current = null;
+      return;
+    }
+
+    const prev = prevGameStateRef.current;
+    if (prev) {
+      const isTurnChanged = gameState.turnNumber > prev.turnNumber;
+      const isActivePlayerChanged = gameState.activePlayerIdx !== prev.activePlayerIdx;
+
+      if (isTurnChanged || isActivePlayerChanged) {
+        const isSequential = gameState.turnStyle === 'sequential';
+        const activePlayerSlot = gameState.players[gameState.activePlayerIdx];
+
+        // Local players who just became active (i.e. it's their turn now)
+        const newlyActiveLocalPlayers = gameState.players.filter(p => {
+          if (!isPlayerLocalToClient(p) || gameState.playerState[p.id]?.lost) return false;
+
+          if (isSequential) {
+            const wasActive = prev.players[prev.activePlayerIdx]?.id === p.id && !isTurnChanged;
+            return p.id === activePlayerSlot?.id && !wasActive;
+          } else {
+            return isTurnChanged;
+          }
+        });
+
+        if (newlyActiveLocalPlayers.length > 0) {
+          const newNotifications: GameNotification[] = [];
+
+          newlyActiveLocalPlayers.forEach(p => {
+            newNotifications.push({
+              id: `turn-start-${gameState.turnNumber}-${p.id}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              message: `🚀 Turn ${gameState.turnNumber} Started for ${p.name}!`,
+              type: 'turn_start',
+              createdAt: Date.now()
+            });
+          });
+
+          if (isTurnChanged) {
+            gameState.systems.forEach(newSys => {
+              const ownerPlayer = newlyActiveLocalPlayers.find(p => p.id === newSys.owner);
+              if (ownerPlayer) {
+                const oldSys = prev.systems.find(s => s.id === newSys.id);
+                if (oldSys && oldSys.buildQueue && oldSys.buildQueue.length > 0) {
+                  const firstJob = oldSys.buildQueue[0];
+                  if (firstJob.turnsRemaining === 1) {
+                    newNotifications.push({
+                      id: `prod-${newSys.id}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                      message: `🛠️ ${newSys.name} finished producing ${firstJob.shipType}!`,
+                      type: 'production',
+                      systemId: newSys.id,
+                      createdAt: Date.now()
+                    });
+                  }
+                }
+              }
+            });
+          }
+
+          if (newNotifications.length > 0) {
+            setNotifications(prevNotifs => [...prevNotifs, ...newNotifications]);
+            
+            // Setup auto-dismiss for each new notification after 6 seconds
+            newNotifications.forEach(notif => {
+              setTimeout(() => {
+                setNotifications(prev => prev.filter(n => n.id !== notif.id));
+              }, 6000);
+            });
+          }
+        }
+      }
+    }
+
+    prevGameStateRef.current = gameState;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState, screen]);
+
 
   // When on the game screen, if we are the host, poll for pending join requests every 5 s
   React.useEffect(() => {
@@ -1078,17 +1159,18 @@ export default function App() {
     }
 
     const activeRules = gameModes.find(m => m.id === selectedModeId) || NORMAL_RULES;
-    const initialized = initializeGame({
+    const setupOptions = {
       gridWidth: gridSize,
       gridHeight: gridSize,
       numSystems: systemCount,
       players: updatedSetup,
       rules: activeRules,
       turnStyle: turnStyle
-    });
+    };
+    const initialized = initializeGame(setupOptions);
     
     const gameName = `Skirmish Match (${new Date().toLocaleDateString()})`;
-    const res = await createGame(gameName, initialized);
+    const res = await createGame(gameName, null, setupOptions);
     if (res.success && res.gameId) {
       setActiveGameId(res.gameId);
       setGameOwnerEmail(currentUser ? currentUser.email : null);
@@ -1289,85 +1371,83 @@ export default function App() {
   if (!gameState && screen === 'game') return null;
 
   // Handle ship scheduling / queuing
-  const handleQueueShip = (shipType: string) => {
+  const handleQueueShip = async (shipType: string) => {
     if (!gameState || !activePlayer || selectedSystemId === null) return;
-    const stateCopy = { ...gameState };
-    const res = queueShipProduction(stateCopy, activePlayer.id, selectedSystemId, shipType);
-    if (res.success) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+    const res = await performGameAction(activeGameId!, 'queue_production', activePlayer.id, {
+      systemId: selectedSystemId,
+      shipType
+    });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
     } else {
-      showError(res.reason || 'Failed to queue ship production.');
+      showError(res.error || 'Failed to queue ship production.');
     }
   };
 
   // Handle upgrade trigger
-  const handleUpgradeSystem = (upgradeType: string, systemId?: number) => {
+  const handleUpgradeSystem = async (upgradeType: string, systemId?: number) => {
     if (!gameState || !activePlayer) return;
-    const stateCopy = { ...gameState };
-    const res = upgradeSystem(stateCopy, activePlayer.id, systemId || 0, upgradeType);
-    if (res.success) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+    const res = await performGameAction(activeGameId!, 'upgrade_system', activePlayer.id, {
+      systemId: systemId || 0,
+      upgradeType
+    });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
     } else {
-      showError(res.reason || 'Failed to apply upgrade.');
+      showError(res.error || 'Failed to apply upgrade.');
     }
   };
 
   // Handle fleet dispatch
-  const handleDispatchFleet = (destSysId: number, ships: Record<string, number>) => {
+  const handleDispatchFleet = async (destSysId: number, ships: Record<string, number>) => {
     if (!gameState || !activePlayer || selectedSystemId === null) return;
-    const stateCopy = { ...gameState };
-    const res = dispatchFleet(stateCopy, activePlayer.id, selectedSystemId, destSysId, ships);
-    if (res.success) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+    const res = await performGameAction(activeGameId!, 'dispatch_fleet', activePlayer.id, {
+      sourceSysId: selectedSystemId,
+      destSysId,
+      shipQuantities: ships
+    });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
       setSelectedSystemId(null);
     } else {
-      showError(res.reason || 'Failed to dispatch fleet.');
+      showError(res.error || 'Failed to dispatch fleet.');
     }
   };
 
   // Handle fleet recall
-  const handleRecallFleet = (fleetId: string) => {
+  const handleRecallFleet = async (fleetId: string) => {
     if (!gameState || !activePlayer) return;
-    const stateCopy = { ...gameState };
-    const res = recallFleet(stateCopy, activePlayer.id, fleetId);
-    if (res.success) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+    const res = await performGameAction(activeGameId!, 'recall_fleet', activePlayer.id, { fleetId });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
       setSelectedFleetId(null);
     } else {
-      showError(res.reason || 'Failed to cancel fleet travel.');
+      showError(res.error || 'Failed to cancel fleet travel.');
     }
   };
 
   // Handle cancel dispatch
-  const handleCancelDispatch = (fleetId: string) => {
+  const handleCancelDispatch = async (fleetId: string) => {
     if (!gameState || !activePlayer) return;
-    const stateCopy = { ...gameState };
-    const res = cancelDispatch(stateCopy, activePlayer.id, fleetId);
-    if (res.success) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+    const res = await performGameAction(activeGameId!, 'cancel_dispatch', activePlayer.id, { fleetId });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
       if (selectedFleetId === fleetId) {
         setSelectedFleetId(null);
       }
     } else {
-      showError(res.reason || 'Failed to cancel dispatch.');
+      showError(res.error || 'Failed to cancel dispatch.');
     }
   };
 
   // Handle cancel production
-  const handleCancelProduction = (systemId: number, jobIndex: number) => {
+  const handleCancelProduction = async (systemId: number, jobIndex: number) => {
     if (!gameState || !activePlayer) return;
-    const stateCopy = { ...gameState };
-    const res = cancelProduction(stateCopy, activePlayer.id, systemId, jobIndex);
-    if (res.success) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+    const res = await performGameAction(activeGameId!, 'cancel_production', activePlayer.id, { systemId, jobIndex });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
     } else {
-      showError(res.reason || 'Failed to cancel production.');
+      showError(res.error || 'Failed to cancel production.');
     }
   };
 
@@ -1407,208 +1487,75 @@ export default function App() {
     return false;
   };
 
-  // Helper: Advance turns sequentially (AIs take turns in order, round rolls over when everyone is done)
-  const advanceSequentialTurns = (stateCopy: GameState) => {
-    if (stateCopy.turnStyle !== 'sequential') return;
 
-    let roundInProgress = true;
-    while (roundInProgress) {
-      if (checkGameOver(stateCopy)) {
-        break;
-      }
-
-      // 1. Check if the current active player is an AI and needs to play
-      const activePlayer = stateCopy.players[stateCopy.activePlayerIdx];
-      if (activePlayer && activePlayer.type === 'ai' && !stateCopy.playerState[activePlayer.id].lost && !activePlayer.endedTurn) {
-        runAITurn(stateCopy, activePlayer.id);
-        activePlayer.endedTurn = true;
-      }
-
-      // 2. Check if all active players (both human and AI) have ended their turns
-      const activePlayers = stateCopy.players.filter(p => !stateCopy.playerState[p.id].lost);
-      const allActiveEnded = activePlayers.every(p => p.endedTurn);
-
-      if (allActiveEnded) {
-        // Roll over round
-        processTurnEnd(stateCopy);
-
-        // Reset endedTurn flags for all players for the new round
-        stateCopy.players.forEach(p => {
-          p.endedTurn = false;
-        });
-
-        // Set active player back to the first active player (human or AI)
-        const firstActive = stateCopy.players.find(p => !stateCopy.playerState[p.id].lost);
-        if (firstActive) {
-          stateCopy.activePlayerIdx = stateCopy.players.indexOf(firstActive);
-        } else {
-          break;
-        }
-      } else {
-        // If current active player has ended their turn, transition to the next player in order
-        const currentActive = stateCopy.players[stateCopy.activePlayerIdx];
-        if (currentActive && currentActive.endedTurn) {
-          let nextIdx = stateCopy.activePlayerIdx;
-          let foundNext = false;
-          for (let i = 0; i < stateCopy.players.length; i++) {
-            nextIdx = (nextIdx + 1) % stateCopy.players.length;
-            const p = stateCopy.players[nextIdx];
-            if (!stateCopy.playerState[p.id].lost && !p.endedTurn) {
-              stateCopy.activePlayerIdx = nextIdx;
-              foundNext = true;
-              break;
-            }
-          }
-          if (!foundNext) {
-            break;
-          }
-        } else {
-          // Active player is human and hasn't ended their turn. Wait for user input.
-          roundInProgress = false;
-        }
-      }
-    }
-  };
 
   // Cycle Turn to next Player
-  const handleEndTurn = () => {
-    if (!gameState) return;
-    const stateCopy = { ...gameState };
+  const handleEndTurn = async () => {
+    if (!gameState || !activePlayer || !activeGameId) return;
     
     // Clear selection UI
     setSelectedSystemId(null);
     setSelectedFleetId(null);
     setTargetSystem(null);
 
-    // Mark current player as ended their turn
-    const clientActivePlayer = getClientActivePlayer(stateCopy);
-    const playerToEnd = clientActivePlayer 
-      ? stateCopy.players.find(p => p.id === clientActivePlayer.id)
-      : stateCopy.players[stateCopy.activePlayerIdx];
-
-    if (playerToEnd) {
-      playerToEnd.endedTurn = true;
-      logAction(stateCopy, playerToEnd.id, 'end_turn', 'Submitted orders / ended turn');
-    }
-
-    if (stateCopy.turnStyle === 'sequential') {
-      advanceSequentialTurns(stateCopy);
-    } else {
-      // Check if all active human players have ended their turn
-      const activeHumans = stateCopy.players.filter(p => p.type === 'human' && !stateCopy.playerState[p.id].lost);
-      const allEnded = activeHumans.every(p => p.endedTurn);
-
-      if (allEnded) {
-        // 1. Process turn end (fleets move, battles resolve, income collected)
-        processTurnEnd(stateCopy);
-
-        // 2. Run AI turns for any remaining active AIs
-        stateCopy.players.forEach(p => {
-          if (p.type === 'ai' && !stateCopy.playerState[p.id].lost) {
-            runAITurn(stateCopy, p.id);
-          }
-        });
-
-        // 3. Reset turn ended flag for all players
-        stateCopy.players.forEach(p => {
-          p.endedTurn = false;
-        });
-
-        // 4. Set active player back to the first active human player
-        const firstActiveHuman = stateCopy.players.find(p => p.type === 'human' && !stateCopy.playerState[p.id].lost);
-        if (firstActiveHuman) {
-          stateCopy.activePlayerIdx = stateCopy.players.indexOf(firstActiveHuman);
-        }
-      } else {
-        // Transition activePlayerIdx to the next active player who hasn't ended their turn
-        let nextIdx = stateCopy.activePlayerIdx;
-        for (let i = 0; i < stateCopy.players.length; i++) {
-          nextIdx = (nextIdx + 1) % stateCopy.players.length;
-          const p = stateCopy.players[nextIdx];
-          if (p.type === 'human' && !stateCopy.playerState[p.id].lost && !p.endedTurn) {
-            stateCopy.activePlayerIdx = nextIdx;
-            break;
-          }
-        }
+    const res = await performGameAction(activeGameId, 'end_turn', activePlayer.id);
+    if (res.success && res.gameState) {
+      const stateCopy = res.gameState;
+      if (checkGameOver(stateCopy)) {
+        setGameState(stateCopy);
+        setScreen('game-over');
+        recordStats(stateCopy);
+        return;
       }
-    }
 
-    if (checkGameOver(stateCopy)) {
+      // Check if we should display the pass-turn secrecy overlay
+      const nextPlayer = stateCopy.players[stateCopy.activePlayerIdx];
+      const isNextLocal = isPlayerLocalToClient(nextPlayer);
+      const localHumansCount = stateCopy.players.filter(
+        p => p.type === 'human' && !stateCopy.playerState[p.id].lost && isPlayerLocalToClient(p)
+      ).length;
+
+      if (isNextLocal && localHumansCount > 1) {
+        setGameState(stateCopy);
+        setNextHumanPlayer(nextPlayer);
+        setScreen('pass-turn');
+        return;
+      }
+
       setGameState(stateCopy);
-      syncGameState(stateCopy);
-      setScreen('game-over');
-      recordStats(stateCopy);
-      return;
+    } else {
+      showError(res.error || 'Failed to end turn.');
     }
-
-    // Check if we should display the pass-turn secrecy overlay
-    const nextPlayer = stateCopy.players[stateCopy.activePlayerIdx];
-    const isNextLocal = isPlayerLocalToClient(nextPlayer);
-    const localHumansCount = stateCopy.players.filter(
-      p => p.type === 'human' && !stateCopy.playerState[p.id].lost && isPlayerLocalToClient(p)
-    ).length;
-
-    if (isNextLocal && localHumansCount > 1) {
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
-      setNextHumanPlayer(nextPlayer);
-      setScreen('pass-turn');
-      return;
-    }
-
-    setGameState(stateCopy);
-    syncGameState(stateCopy);
   };
 
   // Faction control operations
-  const handleClaimFaction = (playerId: number) => {
-    if (!gameState) return;
-    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name') || null;
-    if (!userEmail) return;
-    const stateCopy = { ...gameState };
-    const player = stateCopy.players.find(p => p.id === playerId);
-    if (player && player.type === 'human') {
-      player.assignedEmail = userEmail;
-      player.isLocal = true;
-      setGameState(stateCopy);
-      syncGameState(stateCopy);
+  const handleClaimFaction = async (playerId: number) => {
+    if (!gameState || !activeGameId) return;
+    const res = await performGameAction(activeGameId, 'claim_faction', playerId);
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
+    } else {
+      showError(res.error || 'Failed to claim faction.');
     }
   };
 
-  const handleTogglePlayerLocal = (playerId: number) => {
-    if (!gameState) return;
-    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name') || null;
-    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-    const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
-    const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
-
-    const stateCopy = { ...gameState };
-    const player = stateCopy.players.find(p => p.id === playerId);
-    if (player && player.type === 'human') {
-      const isMe = userEmail && player.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase();
-      if (isOwner || isMe) {
-        player.isLocal = !player.isLocal;
-        setGameState(stateCopy);
-        syncGameState(stateCopy);
-      }
+  const handleTogglePlayerLocal = async (playerId: number) => {
+    if (!gameState || !activeGameId) return;
+    const res = await performGameAction(activeGameId, 'toggle_player_local', playerId);
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
+    } else {
+      showError(res.error || 'Failed to toggle local status.');
     }
   };
 
-  const handleAssignPlayerEmail = (playerId: number, email: string) => {
-    if (!gameState) return;
-    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name') || null;
-    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-    const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
-    const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
-
-    const stateCopy = { ...gameState };
-    const player = stateCopy.players.find(p => p.id === playerId);
-    if (player && player.type === 'human') {
-      if (isOwner) {
-        player.assignedEmail = email.trim() || null;
-        setGameState(stateCopy);
-        syncGameState(stateCopy);
-      }
+  const handleAssignPlayerEmail = async (playerId: number, email: string) => {
+    if (!gameState || !activeGameId) return;
+    const res = await performGameAction(activeGameId, 'assign_player_email', playerId, { email });
+    if (res.success && res.gameState) {
+      setGameState(res.gameState);
+    } else {
+      showError(res.error || 'Failed to assign player email.');
     }
   };
 
@@ -1646,6 +1593,127 @@ export default function App() {
           pointerEvents: 'none'
         }} className="pulse-light">
           {alertMsg}
+        </div>
+      )}
+
+      {/* IN-GAME NOTIFICATIONS STACK */}
+      {screen === 'game' && notifications.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          top: '95px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10002,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          width: '380px',
+          maxWidth: '90vw',
+          pointerEvents: 'none'
+        }}>
+          {notifications.map(notif => {
+            const isProd = notif.type === 'production';
+            const borderColors = {
+              turn_start: 'rgba(0, 240, 255, 0.4)',
+              production: 'rgba(57, 255, 20, 0.4)',
+              info: 'rgba(0, 240, 255, 0.3)',
+              success: 'rgba(57, 255, 20, 0.3)',
+              warning: 'rgba(255, 170, 0, 0.3)'
+            };
+            const glowColors = {
+              turn_start: 'rgba(0, 240, 255, 0.15)',
+              production: 'rgba(57, 255, 20, 0.15)',
+              info: 'rgba(0, 240, 255, 0.1)',
+              success: 'rgba(57, 255, 20, 0.1)',
+              warning: 'rgba(255, 170, 0, 0.1)'
+            };
+            const bgGradient = isProd
+              ? 'linear-gradient(135deg, rgba(13, 29, 15, 0.9) 0%, rgba(5, 13, 6, 0.95) 100%)'
+              : 'linear-gradient(135deg, rgba(10, 15, 29, 0.9) 0%, rgba(5, 7, 13, 0.95) 100%)';
+            const borderColor = borderColors[notif.type] || borderColors.info;
+            const glowColor = glowColors[notif.type] || glowColors.info;
+
+            return (
+              <div
+                key={notif.id}
+                onClick={() => dismissNotification(notif.id, notif.systemId)}
+                style={{
+                  background: bgGradient,
+                  backdropFilter: 'blur(12px)',
+                  border: `1px solid ${borderColor}`,
+                  boxShadow: `0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 0 15px ${glowColor}`,
+                  borderRadius: '8px',
+                  padding: '12px 16px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  pointerEvents: 'auto',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  fontFamily: 'Outfit, sans-serif',
+                  transition: 'transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
+                  userSelect: 'none',
+                  animation: 'slideDownFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+                }}
+                className="notification-card"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px) scale(1.02)';
+                  e.currentTarget.style.borderColor = isProd ? 'var(--accent-green)' : 'var(--accent-cyan)';
+                  e.currentTarget.style.boxShadow = `0 12px 40px 0 rgba(0, 0, 0, 0.7), 0 0 15px ${isProd ? 'rgba(57,255,20,0.3)' : 'rgba(0,240,255,0.3)'}`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                  e.currentTarget.style.borderColor = borderColor;
+                  e.currentTarget.style.boxShadow = `0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 0 15px ${glowColor}`;
+                }}
+                title={notif.systemId !== undefined ? "Left-click to center on planet & dismiss" : "Left-click to dismiss"}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: '13px', lineHeight: '1.4', flex: 1, minWidth: 0, textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                    {/* TODO(security): React's native string interpolation automatically escapes notif.message, preventing XSS. */}
+                    {notif.message}
+                  </span>
+                  {notif.systemId !== undefined && (
+                    <span 
+                      style={{ 
+                        fontSize: '11px', 
+                        color: 'var(--accent-cyan)', 
+                        background: 'rgba(0, 240, 255, 0.1)', 
+                        padding: '2px 6px', 
+                        borderRadius: '4px',
+                        fontFamily: 'Share Tech Mono',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      LOCATE 📍
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dismissNotification(notif.id);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    padding: '4px 6px',
+                    lineHeight: '1',
+                    transition: 'color 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'white'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                  title="Dismiss only"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 

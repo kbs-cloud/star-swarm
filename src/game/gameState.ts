@@ -684,7 +684,7 @@ export function dispatchFleet(
   const newFleet: Fleet = {
     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
     owner: playerId,
-    ships: { ...initialFleetShips, ...shipQuantities },
+    ships: { ...initialFleetShips, ...shipQuantities } as any,
     source: { x: source.x, y: source.y, name: source.name, id: source.id },
     destination: { x: dest.x, y: dest.y, name: dest.name, id: dest.id },
     currentPos: { x: source.x, y: source.y },

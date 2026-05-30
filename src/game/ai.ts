@@ -12,7 +12,7 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
   const aiSystems = gameState.systems.filter(s => s.owner === aiPlayerId);
   if (aiSystems.length === 0) return;
 
-  const activeRules = gameState.rules || {
+  const activeRules = (gameState.rules || {
     enableCredits: true,
     enableUpgrades: true,
     captureRequiresColonyShip: true,
@@ -28,7 +28,7 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
       Shields: { name: 'Shields', baseCost: 35, multiplier: 1.7, description: '' },
       Hyperdrive: { name: 'Hyperdrive', baseCost: 50, multiplier: 2.0, description: '' }
     }
-  };
+  }) as any;
 
   // 1. Tech Upgrades
   // AI upgrades Hyperdrive occasionally if it has plenty of resources and upgrades are enabled
@@ -69,7 +69,7 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
       if (shipTypes.length > 0) {
         const maxQueue = sys.shipyardLvl + 1;
         while (sys.buildQueue.length < maxQueue) {
-          const cheapestCost = Math.min(...Object.values(activeRules.ships).map(s => s.cost));
+          const cheapestCost = Math.min(...Object.values(activeRules.ships).map((s: any) => s.cost));
           if (activeRules.enableCredits && aiState.resources < cheapestCost) {
             break;
           }

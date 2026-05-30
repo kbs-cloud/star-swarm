@@ -190,3 +190,16 @@ body {
   font-size: 12px;
   color: var(--accent-cyan);
 }
+
+/* Notifications Animation */
+@keyframes slideDownFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
