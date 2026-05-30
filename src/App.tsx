@@ -107,6 +107,46 @@ export default function App() {
   React.useEffect(() => {
     soundMutedRef.current = soundMuted;
   }, [soundMuted]);
+
+  const lastHoveredButtonRef = React.useRef<Element | null>(null);
+
+  React.useEffect(() => {
+    const handleMouseEnter = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target || typeof target.closest !== 'function') return;
+      
+      const button = target.closest('button, .btn-sci-fi, [role="button"]');
+      if (button) {
+        if (button === lastHoveredButtonRef.current) {
+          return;
+        }
+        lastHoveredButtonRef.current = button;
+        
+        if (button.hasAttribute('disabled') || button.classList.contains('disabled')) return;
+        
+        if (!soundMutedRef.current) {
+          try {
+            const audio = new Audio('/button-hover.mp3');
+            audio.volume = 0.15;
+            audio.play().catch(err => {
+              if (err.name !== 'AbortError') {
+                console.warn('Hover audio playback failed:', err);
+              }
+            });
+          } catch (err) {
+            console.warn('Hover audio context initialization failed:', err);
+          }
+        }
+      } else {
+        lastHoveredButtonRef.current = null;
+      }
+    };
+
+    document.addEventListener('mouseenter', handleMouseEnter, true);
+    return () => {
+      document.removeEventListener('mouseenter', handleMouseEnter, true);
+    };
+  }, []);
   
   // Persistent Database Game States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -1561,6 +1601,19 @@ export default function App() {
     setSelectedSystemId(null);
     setSelectedFleetId(null);
     setTargetSystem(null);
+
+    // Play end-turn sound effect if not muted
+    if (!soundMutedRef.current) {
+      try {
+        const audio = new Audio('/end-turn.mp3');
+        audio.volume = 0.45;
+        audio.play().catch(err => {
+          console.warn('Audio playback failed:', err);
+        });
+      } catch (err) {
+        console.warn('Audio context initialization failed:', err);
+      }
+    }
 
     const res = await performGameAction(activeGameId, 'end_turn', activePlayer.id);
     if (res.success && res.gameState) {
