@@ -20,7 +20,7 @@ cd /home/gemini/live/starswarm
 
 # 3. Restart the systemd user service
 echo "Restarting starswarm systemd service..."
-systemctl --user daemon-reload
-systemctl --user restart starswarm.service
+systemctl daemon-reload
+systemctl restart starswarm.service
 
 echo "=== Deployment finished successfully ==="

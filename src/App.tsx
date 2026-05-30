@@ -14,7 +14,7 @@ import {
   getCurrentUser,
   registerUser,
   loginUser,
-  loginWithGoogle,
+  checkGoogleOAuthConfig,
   logoutUser,
   UserAccount,
   recordGameStats,
@@ -225,8 +225,7 @@ export default function App() {
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
 
   // Google OAuth State
-  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
+  const [isGoogleAuthEnabled, setIsGoogleAuthEnabled] = useState(false);
 
   const [settingsDisplayName, setSettingsDisplayName] = useState<string>('');
   const [settingsNewPassword, setSettingsNewPassword] = useState<string>('');
@@ -723,6 +722,10 @@ export default function App() {
       if (user) {
         setCurrentUser(user);
       }
+
+      // Check Google OAuth config
+      const config = await checkGoogleOAuthConfig();
+      setIsGoogleAuthEnabled(config.enabled);
       
       // Check query parameter for gameId
       const params = new URLSearchParams(window.location.search);
@@ -1442,28 +1445,6 @@ export default function App() {
     }
   };
 
-  const handleGoogleLogin = async (email: string) => {
-    setAuthError(null);
-    setAuthSuccess(null);
-    const res = await loginWithGoogle(email);
-    if (res.success && res.user) {
-      setCurrentUser(res.user);
-      setIsGoogleModalOpen(false);
-      setIsAuthModalOpen(false);
-      clearAuthInputs();
-      
-      const params = new URLSearchParams(window.location.search);
-      const urlGameId = params.get('gameId');
-      if (urlGameId) {
-        loadGameFromId(urlGameId, res.user);
-      } else if (pendingJoinGameId) {
-        loadGameFromId(pendingJoinGameId, res.user);
-      }
-    } else {
-      setAuthError(res.message);
-    }
-  };
-
   const handleLogout = () => {
     logoutUser();
     setCurrentUser(null);
@@ -1476,7 +1457,6 @@ export default function App() {
     setAuthPassword('');
     setAuthError(null);
     setAuthSuccess(null);
-    setCustomGoogleEmail('');
   };
 
   // Records user statistics on victory/defeat
@@ -3879,172 +3859,41 @@ export default function App() {
               </button>
             </form>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '5px 0' }}>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>OR</span>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-            </div>
+            {isGoogleAuthEnabled && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '5px 0' }}>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>OR</span>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
+                </div>
 
-            {/* Google OAuth Simulation button */}
-            <button 
-              className="btn-sci-fi" 
-              type="button"
-              style={{ 
-                justifyContent: 'center', 
-                background: 'rgba(255, 255, 255, 0.05)', 
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-                color: 'white'
-              }}
-              onClick={() => { setIsGoogleModalOpen(true); }}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" style={{ marginRight: '8px' }}>
-                <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.25-.16-1.84H9v3.47h4.84c-.21 1.12-.84 2.07-1.79 2.7v2.24h2.9c1.69-1.55 2.69-3.85 2.69-6.57z"/>
-                <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.23l-2.9-2.24c-.8.54-1.84.87-3.06.87-2.35 0-4.34-1.58-5.05-3.72H.95v2.3C2.43 15.89 5.5 18 9 18z"/>
-                <path fill="#FBBC05" d="M3.95 10.68c-.18-.54-.28-1.12-.28-1.68s.1-1.14.28-1.68V5.02H.95C.34 6.22 0 7.57 0 9s.34 2.78.95 3.98l3-2.3z"/>
-                <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.47.89 11.43 0 9 0 5.5 0 2.43 2.11.95 5.02l3 2.3c.71-2.14 2.7-3.72 5.05-3.72z"/>
-              </svg>
-              SIGN IN WITH GOOGLE
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* SIMULATED GOOGLE OAUTH SELECTOR DIALOG */}
-      {isGoogleModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(5, 3, 13, 0.9)',
-          backdropFilter: 'blur(10px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1100
-        }}>
-          <div style={{
-            width: '380px',
-            background: 'white',
-            borderRadius: '8px',
-            padding: '30px',
-            color: '#202124',
-            fontFamily: 'Roboto, Arial, sans-serif',
-            boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '15px'
-          }}>
-            {/* Google Identity Header */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <svg width="24" height="24" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-              </svg>
-              <div style={{ fontSize: '18px', fontWeight: 500, color: '#202124' }}>Sign in with Google</div>
-              <div style={{ fontSize: '13px', color: '#5f6368' }}>to continue to Star-Swarm Command</div>
-            </div>
-
-            <div style={{ fontSize: '14px', fontWeight: 500, color: '#3c4043', borderBottom: '1px solid #dadce0', paddingBottom: '8px' }}>
-              Choose an account
-            </div>
-
-            {/* Google Accounts List Simulation */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {[
-                { name: 'Swarm Commander', email: 'commander@gmail.com' },
-                { name: 'Alliance Admiral', email: 'alliance.admiral@gmail.com' },
-                { name: 'Xeno Scout', email: 'xeno.scout@gmail.com' }
-              ].map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    padding: '10px 12px',
-                    background: 'none',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    width: '100%',
-                    textAlign: 'left',
-                    transition: 'background 0.2s'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#f5f5f5'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                  onClick={() => handleGoogleLogin(acc.email)}
-                >
-                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#3c4043' }}>{acc.name}</div>
-                  <div style={{ fontSize: '11px', color: '#5f6368' }}>{acc.email}</div>
-                </button>
-              ))}
-            </div>
-
-            <div style={{ borderTop: '1px solid #dadce0', paddingTop: '10px', marginTop: '5px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#5f6368', display: 'block', marginBottom: '4px' }}>
-                OR USE ANOTHER GOOGLE ACCOUNT
-              </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input 
-                  type="email" 
-                  value={customGoogleEmail}
-                  onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                  placeholder="yourname@gmail.com"
-                  style={{
-                    flex: 1,
-                    padding: '8px 12px',
-                    border: '1px solid #dadce0',
-                    borderRadius: '4px',
-                    fontSize: '13px',
-                    color: '#202124',
-                    background: '#f8f9fa'
-                  }}
-                />
+                {/* Google Sign-in button */}
                 <button 
+                  className="btn-sci-fi" 
                   type="button"
-                  style={{
-                    background: '#1a73e8',
+                  style={{ 
+                    justifyContent: 'center', 
+                    background: 'rgba(255, 255, 255, 0.05)', 
+                    borderColor: 'rgba(255, 255, 255, 0.2)',
                     color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '8px 12px',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                    cursor: 'pointer'
+                    width: '100%',
+                    marginTop: '5px'
                   }}
                   onClick={() => {
-                    if (customGoogleEmail && customGoogleEmail.includes('@')) {
-                      handleGoogleLogin(customGoogleEmail);
-                    }
+                    const stateParam = window.location.search;
+                    window.location.href = `/api/auth/google?state=${encodeURIComponent(stateParam)}`;
                   }}
                 >
-                  Next
+                  <svg width="18" height="18" viewBox="0 0 18 18" style={{ marginRight: '8px' }}>
+                    <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.25-.16-1.84H9v3.47h4.84c-.21 1.12-.84 2.07-1.79 2.7v2.24h2.9c1.69-1.55 2.69-3.85 2.69-6.57z"/>
+                    <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.23l-2.9-2.24c-.8.54-1.84.87-3.06.87-2.35 0-4.34-1.58-5.05-3.72H.95v2.3C2.43 15.89 5.5 18 9 18z"/>
+                    <path fill="#FBBC05" d="M3.95 10.68c-.18-.54-.28-1.12-.28-1.68s.1-1.14.28-1.68V5.02H.95C.34 6.22 0 7.57 0 9s.34 2.78.95 3.98l3-2.3z"/>
+                    <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.47.89 11.43 0 9 0 5.5 0 2.43 2.11.95 5.02l3 2.3c.71-2.14 2.7-3.72 5.05-3.72z"/>
+                  </svg>
+                  SIGN IN WITH GOOGLE
                 </button>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-              <button 
-                type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#1a73e8',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  padding: '8px'
-                }}
-                onClick={() => setIsGoogleModalOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
+              </>
+            )}
           </div>
         </div>
       )}

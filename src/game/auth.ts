@@ -100,28 +100,23 @@ export async function loginUser(email: string, password: string): Promise<{ succ
   }
 }
 
-/**
- * Calls `/api/google-login` to authenticate via Google.
- */
-export async function loginWithGoogle(email: string): Promise<{ success: boolean; message: string; user?: UserAccount }> {
-  try {
-    const response = await fetch('/api/google-login', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ email })
-    });
 
-    const data = await response.json();
-    if (response.ok && data.success) {
-      currentUserCache = data.user;
-      return { success: true, message: 'Google authentication successful.', user: data.user };
-    } else {
-      return { success: false, message: data.error || 'Google login failed.' };
+/**
+ * Checks if real Google OAuth is configured on the backend.
+ */
+export async function checkGoogleOAuthConfig(): Promise<{ enabled: boolean }> {
+  try {
+    const response = await fetch('/api/auth/google/config');
+    if (response.ok) {
+      const data = await response.json();
+      return { enabled: !!data.enabled };
     }
   } catch (e) {
-    return { success: false, message: 'Server connection failed.' };
+    console.error('Failed to check Google OAuth configuration status:', e);
   }
+  return { enabled: false };
 }
+
 
 /**
  * Checks if the user is already authenticated via cookies.

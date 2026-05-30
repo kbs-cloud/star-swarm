@@ -22,6 +22,7 @@ const { runAITurn } = require('./src/game/dist/ai.js');
 
 const app = express();
 const PORT = process.env.BACKEND_PORT || process.env.PORT || 3001;
+app.set('trust proxy', 1);
 
 // Database Connection
 const dbPath = path.join(__dirname, 'starswarm.db');
@@ -157,7 +158,7 @@ function generateUniqueInviteCode(callback) {
 function populateMissingInviteCodes() {
   db.all('SELECT id FROM games WHERE invite_code IS NULL', [], (err, rows) => {
     if (err || !rows || rows.length === 0) return;
-    
+
     let processed = 0;
     const updateNext = () => {
       if (processed >= rows.length) return;
@@ -363,8 +364,8 @@ app.post('/api/login', validateCSRF, (req, res) => {
     }
 
     if (!user.password_hash) {
-      return res.status(400).json({ 
-        error: 'This account was created with Google Sign-in. Please click "Sign in with Google" to access it.' 
+      return res.status(400).json({
+        error: 'This account was created with Google Sign-in. Please click "Sign in with Google" to access it.'
       });
     }
 
@@ -390,8 +391,7 @@ app.post('/api/login', validateCSRF, (req, res) => {
         res.cookie('session_id', sessionId, {
           httpOnly: true,
           sameSite: 'lax',
-          // TODO(security): Set secure: true in production HTTPS
-          secure: false,
+          secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
           maxAge: 2 * 60 * 60 * 1000 // 2 hours
         });
 
@@ -410,77 +410,99 @@ app.post('/api/login', validateCSRF, (req, res) => {
   });
 });
 
-// Endpoint: Google login (Simulated OAuth integration)
-app.post('/api/google-login', validateCSRF, (req, res) => {
-  const { email } = req.body;
+const { OAuth2Client } = require('google-auth-library');
 
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ error: 'Invalid Google account email.' });
-  }
+// Initialize Google Client
+const client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_CALLBACK_URL
+);
 
-  const normalizedEmail = email.trim().toLowerCase();
+// Endpoint: Check if real Google OAuth is configured on the backend
+app.get('/api/auth/google/config', (req, res) => {
+  const isConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  res.status(200).json({ enabled: isConfigured });
+});
 
-  // Find or create user
-  db.get('SELECT * FROM users WHERE email = ?', [normalizedEmail], (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database query error.' });
-    }
 
-    if (user) {
-      // User exists. Update is_google_linked if not already set.
-      if (user.is_google_linked === 0) {
-        db.run('UPDATE users SET is_google_linked = 1 WHERE email = ?', [normalizedEmail]);
-      }
-      createAndSendSession(user.email, user.games_played, user.games_won, 1, user.display_name, user.password_hash !== null);
-    } else {
-      // User does not exist, auto-create
-      db.run(
-        'INSERT INTO users (email, password_hash, is_google_linked) VALUES (?, NULL, 1)',
-        [normalizedEmail],
-        function (insertErr) {
-          if (insertErr) {
-            return res.status(500).json({ error: 'Failed to auto-register Google account.' });
-          }
-          createAndSendSession(normalizedEmail, 0, 0, 1, null, false);
-        }
-      );
-    }
+// 1. Redirect User to Google
+app.get('/api/auth/google', (req, res) => {
+  const state = req.query.state || '';
+  const url = client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/userinfo.email', 'profile'],
+    state: state
   });
+  res.redirect(url);
+});
 
-  function createAndSendSession(userEmail, gamesPlayed, gamesWon, isGoogleLinked, displayName, hasPassword) {
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    const csrfToken = req.cookies['csrf_token'] || crypto.randomBytes(24).toString('hex');
+// 2. Handle the Callback from Google
+app.get('/api/auth/callback/google', async (req, res) => {
+  const { code, state } = req.query;
 
-    db.run(
-      'INSERT INTO sessions (id, email, expires_at, csrf_token) VALUES (?, ?, ?, ?)',
-      [sessionId, userEmail, expiresAt, csrfToken],
-      (sessionErr) => {
-        if (sessionErr) {
-          return res.status(500).json({ error: 'Failed to create active session.' });
+  try {
+    // Exchange code for tokens
+    const { tokens } = await client.getToken(code);
+    client.setCredentials(tokens);
+
+    // Get user info (email)
+    const ticket = await client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const email = payload.email.toLowerCase();
+    const displayName = payload.name;
+
+    // Use your existing logic to find or create the user [cite: 57, 58]
+    db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
+      if (user) {
+        if (user.is_google_linked === 0) {
+          db.run('UPDATE users SET is_google_linked = 1 WHERE email = ?', [email]);
         }
-
-        res.cookie('session_id', sessionId, {
-          httpOnly: true,
-          sameSite: 'lax',
-          secure: false,
-          maxAge: 2 * 60 * 60 * 1000
-        });
-
-        res.status(200).json({
-          success: true,
-          user: {
-            email: userEmail,
-            displayName: displayName || null,
-            isGoogleLinked: isGoogleLinked === 1,
-            hasPassword: hasPassword,
-            stats: { gamesPlayed, gamesWon }
+        finalizeOAuthLogin(req, res, user.email, user.games_played, user.games_won, 1, user.display_name || displayName, user.password_hash !== null, state);
+      } else {
+        db.run(
+          'INSERT INTO users (email, password_hash, is_google_linked, display_name) VALUES (?, NULL, 1, ?)',
+          [email, displayName],
+          function (insertErr) {
+            if (insertErr) return res.redirect('/login?error=db_fail');
+            finalizeOAuthLogin(req, res, email, 0, 0, 1, displayName, false, state);
           }
-        });
+        );
       }
-    );
+    });
+  } catch (error) {
+    console.error('Google OAuth Error:', error);
+    res.redirect('/login?error=oauth_failed');
   }
 });
+
+// Helper to set session cookies (Refactored from your original createAndSendSession)
+function finalizeOAuthLogin(req, res, userEmail, gamesPlayed, gamesWon, isGoogleLinked, displayName, hasPassword, state) {
+  const sessionId = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const csrfToken = crypto.randomBytes(24).toString('hex');
+
+  db.run(
+    'INSERT INTO sessions (id, email, expires_at, csrf_token) VALUES (?, ?, ?, ?)',
+    [sessionId, userEmail, expiresAt, csrfToken],
+    (err) => {
+      if (err) return res.redirect('/login?error=session_fail');
+
+      res.cookie('session_id', sessionId, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+        maxAge: 2 * 60 * 60 * 1000
+      });
+
+      // Redirect back to the frontend dashboard or home, preserving state query params
+      res.redirect('/' + (state ? state : ''));
+    }
+  );
+}
 
 // Endpoint: Get current user session details
 app.get('/api/me', (req, res) => {
@@ -713,7 +735,7 @@ app.get('/api/games', (req, res) => {
           const sLower = search.toLowerCase();
           const matchesName = row.name && row.name.toLowerCase().includes(sLower);
           const matchesOwner = row.owner_email && row.owner_email.toLowerCase().includes(sLower);
-          const matchesPlayers = parsedState.players && parsedState.players.some(p => 
+          const matchesPlayers = parsedState.players && parsedState.players.some(p =>
             (p.name && p.name.toLowerCase().includes(sLower)) ||
             (p.assignedEmail && p.assignedEmail.toLowerCase().includes(sLower))
           );
@@ -779,7 +801,7 @@ app.post('/api/games', validateCSRF, (req, res) => {
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: 'Invalid game name.' });
     }
-    
+
     let stateToSave;
     if (setupOptions) {
       try {
@@ -795,14 +817,14 @@ app.post('/api/games', validateCSRF, (req, res) => {
     }
 
     const gameStateStr = typeof stateToSave === 'string' ? stateToSave : JSON.stringify(stateToSave);
-    
+
     const gameId = crypto.randomUUID();
-    
+
     generateUniqueInviteCode((inviteCode, codeErr) => {
       if (codeErr || !inviteCode) {
         return res.status(500).json({ error: 'Failed to generate invite code.' });
       }
-      
+
       const ownerEmail = user ? user.email : null;
       const now = new Date().toISOString();
       db.run(
@@ -841,14 +863,14 @@ app.get('/api/games/:id', (req, res) => {
         if (!row) {
           return res.status(404).json({ error: 'Game simulation not found.' });
         }
-        
+
         let parsedState;
         try {
           parsedState = JSON.parse(row.game_state);
         } catch (parseErr) {
           return res.status(500).json({ error: 'Game state corruption detected.' });
         }
-        
+
         const presenceEmail = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
         if (presenceEmail) {
           updatePresence(gameId, presenceEmail);
@@ -885,7 +907,7 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
     if (!name) {
       return res.status(400).json({ error: 'Missing name for update.' });
     }
-    
+
     db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
       if (findErr) {
         return res.status(500).json({ error: 'Database validation error.' });
@@ -893,22 +915,22 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
       if (!row) {
         return res.status(404).json({ error: 'Game not found.' });
       }
-      
+
       const now = new Date().toISOString();
       const fields = [];
       const params = [];
-      
+
       if (name && typeof name === 'string' && name.trim().length > 0) {
         fields.push('name = ?');
         params.push(name.trim());
       }
-      
+
       fields.push('updated_at = ?');
       params.push(now);
-      
+
       // Where clause param
       params.push(gameId);
-      
+
       db.run(
         `UPDATE games SET ${fields.join(', ')} WHERE id = ?`,
         params,
@@ -1011,7 +1033,7 @@ app.post('/api/games/:id/action', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
     const gameId = req.params.id;
     const { action, playerId, params } = req.body;
-    
+
     if (!action || playerId === undefined) {
       return res.status(400).json({ error: 'Missing action or playerId.' });
     }
@@ -1199,7 +1221,7 @@ app.post('/api/games/:id/presence', validateCSRF, (req, res) => {
 app.delete('/api/games/:id', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
     const gameId = req.params.id;
-    
+
     db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
       if (findErr) {
         return res.status(500).json({ error: 'Database validation error.' });
@@ -1210,7 +1232,7 @@ app.delete('/api/games/:id', validateCSRF, (req, res) => {
       if (row.owner_email && (!user || row.owner_email !== user.email)) {
         return res.status(403).json({ error: 'Forbidden. Only the creator can decommission this simulation.' });
       }
-      
+
       db.run('DELETE FROM games WHERE id = ?', [gameId], function (deleteErr) {
         if (deleteErr) {
           console.error('Error deleting game:', deleteErr.message);

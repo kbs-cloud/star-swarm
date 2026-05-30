@@ -1,7 +1,7 @@
 {
   "name": "starswarm",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.18.0",
   "type": "module",
   "scripts": {
     "dev": "npx tsc src/game/gameState.ts src/game/ai.ts --outDir src/game/dist --module commonjs --target es2022 --moduleResolution node --noEmit false --esModuleInterop --ignoreConfig --ignoreDeprecations 6.0 && concurrently \"node server.cjs\" \"vite\"",
@@ -15,6 +15,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "google-auth-library": "^10.6.2",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
