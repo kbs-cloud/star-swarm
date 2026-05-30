@@ -424,6 +424,7 @@ test.describe('Star-Swarm E2E Tests', () => {
 
     // Get the game ID from URL
     await expect(pageA.locator('canvas')).toBeVisible();
+    await expect(pageA).toHaveURL(/gameId=/);
     const url = pageA.url();
     const gameIdMatch = url.match(/gameId=([^&]+)/);
     const gameId = gameIdMatch ? gameIdMatch[1] : '';
@@ -530,6 +531,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     expect(shortCode).toHaveLength(8); // Verify short code is 8 chars
 
     // Verify browser URL contains short code
+    await expect(pageA).toHaveURL(/gameId=/);
     const gameUrl = pageA.url();
     expect(gameUrl).toContain(`gameId=${shortCode}`);
 

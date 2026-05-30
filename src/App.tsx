@@ -126,7 +126,7 @@ export default function App() {
         if (!soundMutedRef.current) {
           try {
             const audio = new Audio('/button-hover.mp3');
-            audio.volume = 0.15;
+            audio.volume = 0.85;
             audio.play().catch(err => {
               if (err.name !== 'AbortError') {
                 console.warn('Hover audio playback failed:', err);
