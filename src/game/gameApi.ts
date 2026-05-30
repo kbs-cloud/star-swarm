@@ -56,6 +56,26 @@ export async function updateSettings(displayName: string): Promise<{ success: bo
   }
 }
 
+/**
+ * Securely updates user password on the database.
+ */
+export async function updatePassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch('/api/settings/password', {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ newPassword })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Failed to update password.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
 export interface GameListParams {
   search?: string;
   status?: string;
@@ -64,6 +84,7 @@ export interface GameListParams {
   turns?: string;
   limit: number;
   offset: number;
+  ids?: string;
 }
 
 /**
@@ -79,6 +100,7 @@ export async function listGames(params?: GameListParams): Promise<{ success: boo
       if (params.startDate) searchParams.append('startDate', params.startDate);
       if (params.endDate) searchParams.append('endDate', params.endDate);
       if (params.turns) searchParams.append('turns', params.turns);
+      if (params.ids) searchParams.append('ids', params.ids);
       searchParams.append('limit', String(params.limit));
       searchParams.append('offset', String(params.offset));
       url += `?${searchParams.toString()}`;
@@ -169,6 +191,26 @@ export async function updateGame(id: string, gameState: GameState): Promise<{ su
       return { success: true, connectedPlayers: data.connectedPlayers };
     }
     return { success: false, error: data.error || 'Failed to save game state.' };
+  } catch (e) {
+    return { success: false, error: 'Server connection failed.' };
+  }
+}
+
+/**
+ * Updates the game name in the database.
+ */
+export async function updateGameName(id: string, name: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`/api/games/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ name })
+    });
+    const data = await response.json();
+    if (response.ok && data.success) {
+      return { success: true };
+    }
+    return { success: false, error: data.error || 'Failed to update game name.' };
   } catch (e) {
     return { success: false, error: 'Server connection failed.' };
   }

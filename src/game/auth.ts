@@ -9,6 +9,7 @@ export interface UserAccount {
   email: string;
   displayName: string | null;
   isGoogleLinked: boolean;
+  hasPassword?: boolean;
   stats: UserStats;
 }
 

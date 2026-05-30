@@ -36,9 +36,11 @@ import {
   createGame,
   getGame,
   updateGame,
+  updateGameName,
   deleteGame,
   GameMetadata,
   updateSettings,
+  updatePassword,
   requestToJoin,
   fetchPendingJoins,
   checkMyJoinStatus,
@@ -96,6 +98,7 @@ export default function App() {
   
   // Persistent Database Game States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
+  const [activeGameName, setActiveGameName] = useState<string>('');
   const [savedGames, setSavedGames] = useState<GameMetadata[]>([]);
   const [_, setIsLoadingGame] = useState(false);
   const [gameToDelete, setGameToDelete] = useState<GameMetadata | null>(null);
@@ -155,6 +158,11 @@ export default function App() {
   const [customGoogleEmail, setCustomGoogleEmail] = useState('');
 
   const [settingsDisplayName, setSettingsDisplayName] = useState<string>('');
+  const [settingsCurrentPassword, setSettingsCurrentPassword] = useState<string>('');
+  const [settingsNewPassword, setSettingsNewPassword] = useState<string>('');
+  const [settingsConfirmPassword, setSettingsConfirmPassword] = useState<string>('');
+  const [passwordStatusMessage, setPasswordStatusMessage] = useState<string | null>(null);
+  const [passwordStatusType, setPasswordStatusType] = useState<'success' | 'error' | null>(null);
 
   React.useEffect(() => {
     if (currentUser) {
@@ -162,7 +170,12 @@ export default function App() {
     } else {
       setSettingsDisplayName(localStorage.getItem('starswarm_display_name') || '');
     }
-  }, [currentUser]);
+    setSettingsCurrentPassword('');
+    setSettingsNewPassword('');
+    setSettingsConfirmPassword('');
+    setPasswordStatusMessage(null);
+    setPasswordStatusType(null);
+  }, [currentUser, screen]);
 
   React.useEffect(() => {
     const localName = currentUser?.displayName || localStorage.getItem('starswarm_display_name') || 'Vanguard (You)';
@@ -221,9 +234,22 @@ export default function App() {
 
   // Helper: Load saved games list from database
   const loadGamesList = async (resetList = true) => {
-    if (!currentUser) return;
-    setIsInfiniteLoading(true);
     const newOffset = resetList ? 0 : gameListOffset;
+
+    let idsParam: string | undefined = undefined;
+    if (!currentUser) {
+      // Fetch list of guest owned games from localStorage
+      const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+      if (ownedGames.length === 0) {
+        setSavedGames([]);
+        setGameListOffset(0);
+        setTotalGamesCount(0);
+        return;
+      }
+      idsParam = ownedGames.join(',');
+    }
+
+    setIsInfiniteLoading(true);
     const res = await listGames({
       search: gameSearchQuery,
       status: gameSearchStatus,
@@ -231,7 +257,8 @@ export default function App() {
       endDate: gameEndDate,
       turns: gameTurnsFilter,
       limit: 10,
-      offset: newOffset
+      offset: newOffset,
+      ids: idsParam
     });
     setIsInfiniteLoading(false);
     if (res.success && res.games && res.totalCount !== undefined) {
@@ -252,7 +279,7 @@ export default function App() {
   };
 
   React.useEffect(() => {
-    if (currentUser && screen === 'menu') {
+    if (screen === 'menu') {
       const timer = setTimeout(() => {
         loadGamesList(true);
       }, 300);
@@ -306,6 +333,7 @@ export default function App() {
 
       setGameState(gameData.gameState);
       setActiveGameId(gameData.id);
+      setActiveGameName(gameData.name || '');
       setGameOwnerEmail(gameData.ownerEmail);
       setConnectedPlayers(res.connectedPlayers || []);
       
@@ -379,6 +407,53 @@ export default function App() {
     setScreen('menu');
   };
 
+  // Helper: Securely change password
+  const handleSavePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordStatusMessage(null);
+    setPasswordStatusType(null);
+
+    if (!currentUser) {
+      setPasswordStatusMessage('You must be logged in to change your password.');
+      setPasswordStatusType('error');
+      return;
+    }
+
+    if (!settingsNewPassword || settingsNewPassword.length < 8) {
+      setPasswordStatusMessage('New password must be at least 8 characters long.');
+      setPasswordStatusType('error');
+      return;
+    }
+
+    if (settingsNewPassword !== settingsConfirmPassword) {
+      setPasswordStatusMessage('New passwords do not match.');
+      setPasswordStatusType('error');
+      return;
+    }
+
+    const res = await updatePassword(settingsNewPassword);
+    if (res.success) {
+      setPasswordStatusMessage('Password updated successfully. You will be logged out...');
+      setPasswordStatusType('success');
+      showToast('Password updated successfully. Re-authenticating...', 'success');
+
+      // Clear password fields
+      setSettingsCurrentPassword('');
+      setSettingsNewPassword('');
+      setSettingsConfirmPassword('');
+
+      // Invalidate active session and log out
+      setTimeout(() => {
+        setCurrentUser(null);
+        setScreen('menu');
+        window.location.reload();
+      }, 2000);
+    } else {
+      setPasswordStatusMessage(res.error || 'Failed to change password.');
+      setPasswordStatusType('error');
+    }
+  };
+
   // Helper: Rename player in game
   const handleRenamePlayer = (playerId: number, newName: string) => {
     if (!gameState) return;
@@ -393,6 +468,18 @@ export default function App() {
     }
     setGameState(stateCopy);
     syncGameState(stateCopy);
+  };
+
+  // Helper: Rename game manually
+  const handleRenameGame = async (newName: string) => {
+    if (!activeGameId) return;
+    const res = await updateGameName(activeGameId, newName);
+    if (res.success) {
+      setActiveGameName(newName);
+      showToast('🚀 Game renamed successfully!', 'success');
+    } else {
+      showError(res.error || 'Failed to rename game.');
+    }
   };
 
   // Helper: Cancel end turn inside the active game
@@ -569,6 +656,9 @@ export default function App() {
 
       if (res.success && res.game) {
         setConnectedPlayers(res.connectedPlayers || []);
+        if (res.game.name) {
+          setActiveGameName(res.game.name);
+        }
         
         const serverState = res.game.gameState;
         setGameState(prev => {
@@ -1773,8 +1863,8 @@ export default function App() {
           <div style={{
             display: 'flex',
             gap: '24px',
-            alignItems: currentUser ? 'stretch' : 'center',
-            flexDirection: currentUser ? 'row' : 'column',
+            alignItems: (currentUser || savedGames.length > 0) ? 'stretch' : 'center',
+            flexDirection: (currentUser || savedGames.length > 0) ? 'row' : 'column',
             justifyContent: 'center',
             maxWidth: '1100px',
             width: '100%'
@@ -1806,7 +1896,7 @@ export default function App() {
             </div>
 
             {/* Saved games panel */}
-            {currentUser && (
+            {(currentUser || savedGames.length > 0) && (
               <div style={{
                 flex: '1 1 500px',
                 maxWidth: '600px',
@@ -1986,7 +2076,13 @@ export default function App() {
                       // ignore
                     }
 
-                    const isOwner = game.owner_email === currentUser?.email || (gameStateObj?.players?.[0]?.assignedEmail === currentUser?.email);
+                    const guestNameVal = localStorage.getItem('starswarm_guest_name') || '';
+                    const userEmail = currentUser?.email || guestNameVal;
+                    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+                    const isLocalOwner = ownedGames.includes(game.id);
+                    const isOwner = game.owner_email 
+                      ? (userEmail && game.owner_email.trim().toLowerCase() === userEmail.trim().toLowerCase())
+                      : (isLocalOwner || !userEmail);
 
                     // Get free human slots for this game
                     const freeSlots: { id: number; name: string }[] = (() => {
@@ -2062,7 +2158,7 @@ export default function App() {
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
                                 {gameStateObj.players.map(p => {
                                   const isPlayerLost = gameStateObj?.playerState[p.id]?.lost;
-                                  const isPlayerMe = p.assignedEmail === currentUser?.email;
+                                  const isPlayerMe = userEmail && p.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase();
                                   return (
                                     <div
                                       key={p.id}
@@ -2098,11 +2194,11 @@ export default function App() {
                             }}>
                               <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>STATUS:</span>
                               <span style={{
-                                color: getGameTurnStatus(game, currentUser?.email || null) === 'YOUR TURN' ? 'var(--accent-green)' : 'var(--accent-yellow)',
+                                color: getGameTurnStatus(game, userEmail || null) === 'YOUR TURN' ? 'var(--accent-green)' : 'var(--accent-yellow)',
                                 fontWeight: 'bold',
                                 fontFamily: 'Share Tech Mono'
                               }}>
-                                {getGameTurnStatus(game, currentUser?.email || null)}
+                                {getGameTurnStatus(game, userEmail || null)}
                               </span>
                             </div>
                           </div>
@@ -2137,7 +2233,7 @@ export default function App() {
                                   let stateObj: GameState;
                                   try {
                                     stateObj = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
-                                    const userPlayer = stateObj.players.find(p => p.assignedEmail === currentUser?.email || (p.id === 1 && p.isLocal));
+                                    const userPlayer = stateObj.players.find(p => (userEmail && p.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase()) || (p.id === 1 && p.isLocal));
                                     if (userPlayer) {
                                       handleCancelEndTurnForGame(game.id, userPlayer.id);
                                     }
@@ -2159,7 +2255,7 @@ export default function App() {
                             >
                               RESUME
                             </button>
-                            {game.owner_email === currentUser?.email && (
+                            {isOwner && (
                               <button
                                 className="btn-sci-fi btn-danger"
                                 style={{ padding: '6px 8px', fontSize: '10px', justifyContent: 'center' }}
@@ -2724,6 +2820,8 @@ export default function App() {
             onReturnToMenu={handleReturnToMenu}
             onRenamePlayer={handleRenamePlayer}
             onCancelEndTurn={handleCancelEndTurn}
+            gameName={activeGameName}
+            onRenameGame={handleRenameGame}
             onQueueShip={handleQueueShip}
             onUpgradeSystem={handleUpgradeSystem}
             onDispatchFleet={handleDispatchFleet}
@@ -3021,6 +3119,86 @@ export default function App() {
                 }}
               />
             </div>
+
+            {/* Security Section (Change Password) */}
+            {currentUser && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '15px' }}>
+                <h3 style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  Set / Change Password
+                </h3>
+
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', lineHeight: '1.4' }}>
+                  {currentUser.hasPassword 
+                    ? "Update your account password. This will log you out of all devices/sessions." 
+                    : "Create a password to allow standard email & password login alongside Google Sign-In."}
+                </div>
+
+                <form onSubmit={handleSavePassword} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {passwordStatusMessage && (
+                    <div style={{
+                      background: passwordStatusType === 'success' ? 'rgba(57, 255, 20, 0.1)' : 'rgba(255, 0, 127, 0.1)',
+                      border: passwordStatusType === 'success' ? '1px solid var(--accent-green)' : '1px solid var(--accent-magenta)',
+                      padding: '8px 10px',
+                      borderRadius: '4px',
+                      color: passwordStatusType === 'success' ? 'var(--accent-green)' : 'var(--accent-magenta)',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      fontFamily: 'Share Tech Mono'
+                    }}>
+                      [{passwordStatusType === 'success' ? 'SUCCESS' : 'ERROR'}] {passwordStatusMessage}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
+                      New Password (Min 8 chars)
+                    </label>
+                    <input
+                      type="password"
+                      value={settingsNewPassword}
+                      onChange={(e) => setSettingsNewPassword(e.target.value)}
+                      placeholder="••••••••"
+                      style={{
+                        background: 'rgba(0,0,0,0.5)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'white',
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        fontFamily: 'Share Tech Mono'
+                      }}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
+                      Confirm Password
+                    </label>
+                    <input
+                      type="password"
+                      value={settingsConfirmPassword}
+                      onChange={(e) => setSettingsConfirmPassword(e.target.value)}
+                      placeholder="••••••••"
+                      style={{
+                        background: 'rgba(0,0,0,0.5)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'white',
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        fontFamily: 'Share Tech Mono'
+                      }}
+                      required
+                    />
+                  </div>
+
+                  <button className="btn-sci-fi" type="submit" style={{ justifyContent: 'center', marginTop: '5px', fontSize: '12px', padding: '8px 16px' }}>
+                    SET NEW PASSWORD
+                  </button>
+                </form>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
               <button className="btn-sci-fi" onClick={handleSaveSettings} style={{ flex: 1, justifyContent: 'center' }}>
@@ -3395,6 +3573,9 @@ export default function App() {
                 onClick={async () => {
                   const delRes = await deleteGame(gameToDelete.id);
                   if (delRes.success) {
+                    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+                    const updatedOwned = ownedGames.filter((id: string) => id !== gameToDelete.id);
+                    localStorage.setItem('starswarm_owned_games', JSON.stringify(updatedOwned));
                     loadGamesList();
                   } else {
                     showError(delRes.error || 'Failed to delete game.');

@@ -242,7 +242,7 @@ function getSessionUser(req, callback) {
 
   const now = new Date().toISOString();
   db.get(
-    `SELECT s.csrf_token, u.email, u.display_name, u.is_google_linked, u.games_played, u.games_won 
+    `SELECT s.csrf_token, u.email, u.display_name, u.is_google_linked, u.games_played, u.games_won, u.password_hash 
      FROM sessions s 
      JOIN users u ON s.email = u.email 
      WHERE s.id = ? AND s.expires_at > ?`,
@@ -388,6 +388,7 @@ app.post('/api/login', validateCSRF, (req, res) => {
             email: user.email,
             displayName: user.display_name || null,
             isGoogleLinked: user.is_google_linked === 1,
+            hasPassword: user.password_hash !== null,
             stats: { gamesPlayed: user.games_played, gamesWon: user.games_won }
           }
         });
@@ -417,7 +418,7 @@ app.post('/api/google-login', validateCSRF, (req, res) => {
       if (user.is_google_linked === 0) {
         db.run('UPDATE users SET is_google_linked = 1 WHERE email = ?', [normalizedEmail]);
       }
-      createAndSendSession(user.email, user.games_played, user.games_won, 1, user.display_name);
+      createAndSendSession(user.email, user.games_played, user.games_won, 1, user.display_name, user.password_hash !== null);
     } else {
       // User does not exist, auto-create
       db.run(
@@ -427,13 +428,13 @@ app.post('/api/google-login', validateCSRF, (req, res) => {
           if (insertErr) {
             return res.status(500).json({ error: 'Failed to auto-register Google account.' });
           }
-          createAndSendSession(normalizedEmail, 0, 0, 1, null);
+          createAndSendSession(normalizedEmail, 0, 0, 1, null, false);
         }
       );
     }
   });
 
-  function createAndSendSession(userEmail, gamesPlayed, gamesWon, isGoogleLinked, displayName) {
+  function createAndSendSession(userEmail, gamesPlayed, gamesWon, isGoogleLinked, displayName, hasPassword) {
     const sessionId = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     const csrfToken = req.cookies['csrf_token'] || crypto.randomBytes(24).toString('hex');
@@ -459,6 +460,7 @@ app.post('/api/google-login', validateCSRF, (req, res) => {
             email: userEmail,
             displayName: displayName || null,
             isGoogleLinked: isGoogleLinked === 1,
+            hasPassword: hasPassword,
             stats: { gamesPlayed, gamesWon }
           }
         });
@@ -479,6 +481,7 @@ app.get('/api/me', (req, res) => {
         email: user.email,
         displayName: user.display_name || null,
         isGoogleLinked: user.is_google_linked === 1,
+        hasPassword: user.password_hash !== null && user.password_hash !== undefined,
         stats: { gamesPlayed: user.games_played, gamesWon: user.games_won }
       }
     });
@@ -504,6 +507,47 @@ app.put('/api/settings', validateCSRF, (req, res) => {
           return res.status(500).json({ error: 'Failed to update settings.' });
         }
         res.status(200).json({ success: true, message: 'Settings updated successfully.' });
+      }
+    );
+  });
+});
+
+// Endpoint: Change user password securely
+app.put('/api/settings/password', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    if (err || !user) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({ error: 'Please provide a new password.' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+    }
+
+    // TODO(security): The user explicitly requested to never require current password for password changes.
+    const newPasswordHash = bcrypt.hashSync(newPassword, 10);
+    db.run(
+      'UPDATE users SET password_hash = ? WHERE email = ?',
+      [newPasswordHash, user.email],
+      function (updErr) {
+        if (updErr) {
+          console.error('Error updating password:', updErr.message);
+          return res.status(500).json({ error: 'Failed to update password.' });
+        }
+
+        // Invalidate all active sessions for this user
+        db.run('DELETE FROM sessions WHERE email = ?', [user.email], (delErr) => {
+          if (delErr) {
+            console.error('Error invalidating sessions:', delErr.message);
+          }
+          res.clearCookie('session_id');
+          res.status(200).json({ success: true, message: 'Password updated successfully. All sessions invalidated.' });
+        });
       }
     );
   });
@@ -598,11 +642,36 @@ function getGameTurnStatus(gameState, ownerEmail, currentUserEmail) {
 // Endpoint: List active games for logged in user with search, filtering, and pagination
 app.get('/api/games', (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
+    const { search, status, startDate, endDate, turns, limit, offset, ids } = req.query;
 
-    const { search, status, startDate, endDate, turns, limit, offset } = req.query;
+    const guestEmail = req.headers['x-guest-email'] || req.headers['x-guest-name'] || null;
+    const effectiveEmail = user ? user.email : guestEmail;
+
+    if (err || !user) {
+      if (!ids) {
+        return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+      }
+
+      const idList = typeof ids === 'string' ? ids.split(',').filter(Boolean) : [];
+      if (idList.length === 0) {
+        return res.status(200).json({ success: true, games: [], totalCount: 0 });
+      }
+
+      // Query database for these specific IDs
+      const placeholders = idList.map(() => '?').join(',');
+      db.all(
+        `SELECT id, invite_code, owner_email, name, game_state, created_at, updated_at FROM games WHERE id IN (${placeholders}) ORDER BY updated_at DESC`,
+        idList,
+        (queryErr, rows) => {
+          if (queryErr) {
+            console.error('Error fetching guest games:', queryErr.message);
+            return res.status(500).json({ error: 'Failed to fetch guest games.' });
+          }
+          filterAndSend(rows, effectiveEmail);
+        }
+      );
+      return;
+    }
 
     db.all(
       'SELECT id, invite_code, owner_email, name, game_state, created_at, updated_at FROM games WHERE owner_email = ? OR game_state LIKE ? ORDER BY updated_at DESC',
@@ -612,78 +681,81 @@ app.get('/api/games', (req, res) => {
           console.error('Error fetching games:', queryErr.message);
           return res.status(500).json({ error: 'Failed to fetch saved games.' });
         }
-
-        // Filter games in memory
-        const filteredGames = rows.filter(row => {
-          let parsedState;
-          try {
-            parsedState = typeof row.game_state === 'string' ? JSON.parse(row.game_state) : row.game_state;
-          } catch (e) {
-            return false;
-          }
-
-          // Search term filter: matches game name, owner email, or any player's name or email
-          if (search) {
-            const sLower = search.toLowerCase();
-            const matchesName = row.name && row.name.toLowerCase().includes(sLower);
-            const matchesOwner = row.owner_email && row.owner_email.toLowerCase().includes(sLower);
-            const matchesPlayers = parsedState.players && parsedState.players.some(p => 
-              (p.name && p.name.toLowerCase().includes(sLower)) ||
-              (p.assignedEmail && p.assignedEmail.toLowerCase().includes(sLower))
-            );
-            if (!matchesName && !matchesOwner && !matchesPlayers) {
-              return false;
-            }
-          }
-
-          // Status filter: "your_turn", "waiting", "game_over"
-          if (status && status !== 'all') {
-            const turnStatus = getGameTurnStatus(parsedState, row.owner_email, user.email);
-            if (status === 'your_turn') {
-              if (turnStatus !== 'YOUR TURN') return false;
-            } else if (status === 'waiting') {
-              if (!turnStatus.startsWith('WAITING ON') && turnStatus !== 'WAITING ON OTHER PLAYERS') return false;
-            } else if (status === 'game_over') {
-              if (turnStatus !== 'GAME OVER') return false;
-            }
-          }
-
-          // Date filters on updated_at
-          if (startDate) {
-            const start = new Date(startDate);
-            const gameDate = new Date(row.updated_at);
-            if (gameDate < start) return false;
-          }
-          if (endDate) {
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
-            const gameDate = new Date(row.updated_at);
-            if (gameDate > end) return false;
-          }
-
-          // Turns filter
-          if (turns) {
-            const turnNum = parseInt(turns);
-            if (!isNaN(turnNum) && parsedState.turnNumber !== turnNum) {
-              return false;
-            }
-          }
-
-          return true;
-        });
-
-        // Paginate
-        const limitNum = parseInt(limit) || 10;
-        const offsetNum = parseInt(offset) || 0;
-        const paginatedGames = filteredGames.slice(offsetNum, offsetNum + limitNum);
-
-        res.status(200).json({
-          success: true,
-          games: paginatedGames,
-          totalCount: filteredGames.length
-        });
+        filterAndSend(rows, effectiveEmail);
       }
     );
+
+    function filterAndSend(rows, emailToFilter) {
+      // Filter games in memory
+      const filteredGames = rows.filter(row => {
+        let parsedState;
+        try {
+          parsedState = typeof row.game_state === 'string' ? JSON.parse(row.game_state) : row.game_state;
+        } catch (e) {
+          return false;
+        }
+
+        // Search term filter: matches game name, owner email, or any player's name or email
+        if (search) {
+          const sLower = search.toLowerCase();
+          const matchesName = row.name && row.name.toLowerCase().includes(sLower);
+          const matchesOwner = row.owner_email && row.owner_email.toLowerCase().includes(sLower);
+          const matchesPlayers = parsedState.players && parsedState.players.some(p => 
+            (p.name && p.name.toLowerCase().includes(sLower)) ||
+            (p.assignedEmail && p.assignedEmail.toLowerCase().includes(sLower))
+          );
+          if (!matchesName && !matchesOwner && !matchesPlayers) {
+            return false;
+          }
+        }
+
+        // Status filter: "your_turn", "waiting", "game_over"
+        if (status && status !== 'all') {
+          const turnStatus = getGameTurnStatus(parsedState, row.owner_email, emailToFilter);
+          if (status === 'your_turn') {
+            if (turnStatus !== 'YOUR TURN') return false;
+          } else if (status === 'waiting') {
+            if (!turnStatus.startsWith('WAITING ON') && turnStatus !== 'WAITING ON OTHER PLAYERS') return false;
+          } else if (status === 'game_over') {
+            if (turnStatus !== 'GAME OVER') return false;
+          }
+        }
+
+        // Date filters on updated_at
+        if (startDate) {
+          const start = new Date(startDate);
+          const gameDate = new Date(row.updated_at);
+          if (gameDate < start) return false;
+        }
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          const gameDate = new Date(row.updated_at);
+          if (gameDate > end) return false;
+        }
+
+        // Turns filter
+        if (turns) {
+          const turnNum = parseInt(turns);
+          if (!isNaN(turnNum) && parsedState.turnNumber !== turnNum) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+
+      // Paginate
+      const limitNum = parseInt(limit) || 10;
+      const offsetNum = parseInt(offset) || 0;
+      const paginatedGames = filteredGames.slice(offsetNum, offsetNum + limitNum);
+
+      res.status(200).json({
+        success: true,
+        games: paginatedGames,
+        totalCount: filteredGames.length
+      });
+    }
   });
 });
 
@@ -781,28 +853,47 @@ app.get('/api/games/:id', (req, res) => {
 app.put('/api/games/:id', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
     const gameId = req.params.id;
-    const { game_state } = req.body;
-    if (!game_state) {
-      return res.status(400).json({ error: 'Missing game state for update.' });
+    const { game_state, name } = req.body;
+    if (!game_state && !name) {
+      return res.status(400).json({ error: 'Missing game state or name for update.' });
     }
-    const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
     
-      db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
-        if (findErr) {
-          return res.status(500).json({ error: 'Database validation error.' });
-        }
-        if (!row) {
-          return res.status(404).json({ error: 'Game not found.' });
-        }
-        
-        const now = new Date().toISOString();
+    db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
+      if (findErr) {
+        return res.status(500).json({ error: 'Database validation error.' });
+      }
+      if (!row) {
+        return res.status(404).json({ error: 'Game not found.' });
+      }
+      
+      const now = new Date().toISOString();
+      const fields = [];
+      const params = [];
+      
+      if (game_state) {
+        const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
+        fields.push('game_state = ?');
+        params.push(gameStateStr);
+      }
+      
+      if (name && typeof name === 'string' && name.trim().length > 0) {
+        fields.push('name = ?');
+        params.push(name.trim());
+      }
+      
+      fields.push('updated_at = ?');
+      params.push(now);
+      
+      // Where clause param
+      params.push(gameId);
+      
       db.run(
-        'UPDATE games SET game_state = ?, updated_at = ? WHERE id = ?',
-        [gameStateStr, now, gameId],
+        `UPDATE games SET ${fields.join(', ')} WHERE id = ?`,
+        params,
         function (updateErr) {
           if (updateErr) {
             console.error('Error updating game:', updateErr.message);
-            return res.status(500).json({ error: 'Failed to update game state.' });
+            return res.status(500).json({ error: 'Failed to update game.' });
           }
           const presenceEmail = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
           if (presenceEmail) {
@@ -811,7 +902,7 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
           res.status(200).json({
             success: true,
             connectedPlayers: getPresence(gameId),
-            message: 'Game state updated successfully.'
+            message: 'Game updated successfully.'
           });
         }
       );

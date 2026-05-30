@@ -28,6 +28,8 @@ interface DashboardProps {
   onClaimFaction: (playerId: number) => void;
   onTogglePlayerLocal: (playerId: number) => void;
   onAssignPlayerEmail: (playerId: number, email: string) => void;
+  gameName: string;
+  onRenameGame: (newName: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -57,6 +59,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onClaimFaction,
   onTogglePlayerLocal,
   onAssignPlayerEmail,
+  gameName,
+  onRenameGame,
 }) => {
   const activePlayer = gameState.playerState[activePlayerId];
   const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId) || null;
@@ -78,6 +82,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
     setDispatchQty(initialQty);
   }, [selectedSystemId, targetSystem?.id, gameState.rules?.id]);
+
+  // State for editing the game name
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState(gameName);
+
+  // Sync editedName when gameName prop updates from server polling, but only when not actively editing
+  React.useEffect(() => {
+    if (!isEditingName) {
+      setEditedName(gameName);
+    }
+  }, [gameName, isEditingName]);
+
+  const handleSaveGameName = () => {
+    if (editedName.trim() && editedName.trim() !== gameName) {
+      onRenameGame(editedName.trim());
+    }
+    setIsEditingName(false);
+  };
+
+  const handleCancelGameName = () => {
+    setEditedName(gameName);
+    setIsEditingName(false);
+  };
 
   // State for active combat log expanded index
   const [selectedBattleLogIndex, setSelectedBattleLogIndex] = useState<number | null>(null);
@@ -436,6 +463,138 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
             </>
+          )}
+        </div>
+
+        {/* GAME NAME INTERACTIVE SUB-PANEL */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '4px 12px',
+          borderRadius: '4px',
+          background: isEditingName ? 'rgba(0, 0, 0, 0.4)' : 'transparent',
+          border: isEditingName ? '1px solid rgba(0, 240, 255, 0.3)' : '1px solid transparent',
+          boxShadow: isEditingName ? '0 0 10px rgba(0, 240, 255, 0.1)' : 'none',
+          transition: 'all 0.2s ease',
+          pointerEvents: 'auto',
+          margin: '0 20px',
+          flex: '1',
+          justifyContent: 'center',
+          minWidth: 0
+        }}>
+          {isEditingName ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                type="text"
+                value={editedName}
+                onChange={(e) => setEditedName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveGameName();
+                  if (e.key === 'Escape') handleCancelGameName();
+                }}
+                autoFocus
+                style={{
+                  background: 'rgba(5, 3, 13, 0.85)',
+                  border: '1px solid var(--accent-cyan)',
+                  color: 'white',
+                  fontFamily: 'Share Tech Mono, monospace',
+                  fontSize: '14px',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  outline: 'none',
+                  boxShadow: '0 0 8px rgba(0, 240, 255, 0.2)',
+                  minWidth: '150px',
+                  maxWidth: '280px'
+                }}
+              />
+              <button
+                onClick={handleSaveGameName}
+                title="Save Name"
+                style={{
+                  background: 'rgba(0, 240, 255, 0.15)',
+                  border: '1px solid var(--accent-cyan)',
+                  color: 'var(--accent-cyan)',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s'
+                }}
+              >
+                ✓
+              </button>
+              <button
+                onClick={handleCancelGameName}
+                title="Cancel"
+                style={{
+                  background: 'rgba(255, 0, 127, 0.15)',
+                  border: '1px solid var(--accent-magenta)',
+                  color: 'var(--accent-magenta)',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <div 
+              onClick={() => setIsEditingName(true)}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8px', 
+                cursor: 'pointer',
+                userSelect: 'none',
+                minWidth: 0
+              }}
+              title="Click to rename game"
+            >
+              <span style={{
+                fontSize: '13px',
+                fontWeight: 'bold',
+                fontFamily: 'Orbitron, sans-serif',
+                letterSpacing: '1px',
+                color: 'white',
+                textShadow: '0 0 6px rgba(255, 255, 255, 0.15)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '300px'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.color = 'var(--accent-cyan)';
+                e.currentTarget.style.textShadow = '0 0 8px rgba(0, 240, 255, 0.4)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.color = 'white';
+                e.currentTarget.style.textShadow = '0 0 6px rgba(255, 255, 255, 0.15)';
+              }}
+              >
+                {gameName || 'UNNAMED SIMULATION'}
+              </span>
+              <span 
+                style={{ 
+                  fontSize: '11px', 
+                  opacity: 0.5,
+                  transition: 'opacity 0.2s',
+                }}
+              >
+                ✏️
+              </span>
+            </div>
           )}
         </div>
 
