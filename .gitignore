@@ -27,3 +27,8 @@ dist-ssr
 
 # Database
 *.db
+
+# Playwright
+playwright-report/
+test-results/
+

@@ -212,6 +212,7 @@ export default function App() {
   }
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
   const prevGameStateRef = React.useRef<GameState | null>(null);
+  const prevGameIdRef = React.useRef<string | null>(null);
 
   const dismissNotification = (id: string, systemId?: number) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -705,8 +706,24 @@ export default function App() {
 
   // Monitor turn transitions and planet production completions
   React.useEffect(() => {
-    if (!gameState || screen !== 'game') {
+    if (!gameState || !activeGameId) {
       prevGameStateRef.current = null;
+      prevGameIdRef.current = null;
+      return;
+    }
+
+    if (prevGameIdRef.current !== activeGameId) {
+      prevGameStateRef.current = gameState;
+      prevGameIdRef.current = activeGameId;
+      return;
+    }
+
+    // Only process notifications when actually viewing the game screen.
+    // In Hotseat mode, screen changes to 'pass-turn' temporarily, but we do not
+    // clear prevGameStateRef.current. When the next player clicks "Start Turn"
+    // and screen goes back to 'game', we will check transitions relative to the
+    // last game state we saw.
+    if (screen !== 'game') {
       return;
     }
 
@@ -780,7 +797,7 @@ export default function App() {
 
     prevGameStateRef.current = gameState;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState, screen]);
+  }, [gameState, activeGameId, screen]);
 
 
   // When on the game screen, if we are the host, poll for pending join requests every 5 s
