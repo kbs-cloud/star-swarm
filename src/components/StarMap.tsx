@@ -10,6 +10,7 @@ interface StarMapProps {
   setSelectedFleetId: (id: string | null) => void;
   onSelectTargetSystem: (sys: StarSystem) => void;
   centerOnCoords: { x: number; y: number; trigger: number } | null;
+  targetSystemId: number | null;
 }
 
 export const StarMap: React.FC<StarMapProps> = ({
@@ -21,6 +22,7 @@ export const StarMap: React.FC<StarMapProps> = ({
   setSelectedFleetId,
   onSelectTargetSystem,
   centerOnCoords,
+  targetSystemId,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
@@ -241,12 +243,26 @@ export const StarMap: React.FC<StarMapProps> = ({
         ctx.arc(sys.x * cellSize, sys.y * cellSize, 8, 0, Math.PI * 2);
         ctx.stroke();
 
+        // Swarm target system selection indicator (locked target indicator)
+        if (sys.id === targetSystemId) {
+          ctx.strokeStyle = '#39ff14'; // neon green
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 2]);
+          ctx.beginPath();
+          ctx.arc(sys.x * cellSize, sys.y * cellSize, 11, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+
+
         // Draw system names
         ctx.fillStyle = isSysVisible ? '#ffffff' : 'rgba(255, 255, 255, 0.4)';
         ctx.font = '11px "Outfit"';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(sys.name, sys.x * cellSize, sys.y * cellSize - 12);
+        const displayName = sys.isHomePlanet ? `👑 ${sys.name}` : sys.name;
+        ctx.fillText(displayName, sys.x * cellSize, sys.y * cellSize - 12);
 
         // Draw ship counts or question marks (FOG)
         ctx.font = '9px "Share Tech Mono"';
@@ -297,7 +313,7 @@ export const StarMap: React.FC<StarMapProps> = ({
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [gameState, activePlayerId, zoom, panX, panY, selectedSystemId, selectedFleetId, hoveredSysId, hoveredFleetId, vision]);
+  }, [gameState, activePlayerId, zoom, panX, panY, selectedSystemId, selectedFleetId, hoveredSysId, hoveredFleetId, vision, targetSystemId]);
 
   // Click handler: Selects star systems or fleets on the canvas
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -329,8 +345,8 @@ export const StarMap: React.FC<StarMapProps> = ({
     if (clickedSys) {
       setSelectedFleetId(null);
       
-      // If we already have a system selected, and we click another system, trigger targeting
-      if (selectedSystemId && selectedSystemId !== clickedSys.id) {
+      // If we already have a system selected, and we Ctrl + click another system, trigger targeting
+      if (selectedSystemId && selectedSystemId !== clickedSys.id && e.ctrlKey) {
         onSelectTargetSystem(clickedSys);
       } else {
         setSelectedSystemId(clickedSys.id);

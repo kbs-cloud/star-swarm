@@ -71,6 +71,7 @@ export interface StarSystem {
   shieldsLvl: number;
   buildQueue: BuildJob[];
   resourcesPerTurn: number;
+  isHomePlanet?: boolean;
 }
 
 export interface FleetLocation {
@@ -420,23 +421,96 @@ export function initializeGame(options: {
     };
   });
 
-  const systemIndices = Array.from({ length: systems.length }, (_, i) => i);
-  for (let i = systemIndices.length - 1; i > 0; i--) {
+  // Helper to compute Euclidean distance
+  const getDistance = (s1: StarSystem, s2: StarSystem) => {
+    return Math.sqrt((s1.x - s2.x) ** 2 + (s1.y - s2.y) ** 2);
+  };
+
+  const N = processedPlayers.length;
+  let bestSystems: StarSystem[] = [];
+  let bestMinDist = -1;
+  let bestAvgDist = -1;
+
+  if (N > 0 && systems.length >= N) {
+    // Try starting the greedy selection from each available system
+    for (let startIdx = 0; startIdx < systems.length; startIdx++) {
+      const selected: StarSystem[] = [systems[startIdx]];
+
+      while (selected.length < N) {
+        let nextSys: StarSystem | null = null;
+        let maxMinDist = -1;
+
+        for (const sys of systems) {
+          if (selected.includes(sys)) continue;
+
+          let minDist = Infinity;
+          for (const sel of selected) {
+            const d = getDistance(sys, sel);
+            if (d < minDist) {
+              minDist = d;
+            }
+          }
+
+          if (minDist > maxMinDist) {
+            maxMinDist = minDist;
+            nextSys = sys;
+          }
+        }
+
+        if (nextSys) {
+          selected.push(nextSys);
+        } else {
+          break;
+        }
+      }
+
+      // Evaluate the selected set of systems
+      let minDist = Infinity;
+      let sumDist = 0;
+      let count = 0;
+
+      for (let i = 0; i < selected.length; i++) {
+        for (let j = i + 1; j < selected.length; j++) {
+          const d = getDistance(selected[i], selected[j]);
+          if (d < minDist) {
+            minDist = d;
+          }
+          sumDist += d;
+          count++;
+        }
+      }
+      const avgDist = count > 0 ? sumDist / count : 0;
+
+      // Maximize minimum pairwise distance, breaking ties with average distance
+      if (minDist > bestMinDist || (minDist === bestMinDist && avgDist > bestAvgDist)) {
+        bestMinDist = minDist;
+        bestAvgDist = avgDist;
+        bestSystems = selected;
+      }
+    }
+  } else {
+    // Fallback: just use whatever systems we have
+    bestSystems = systems.slice(0, N);
+  }
+
+  // Shuffle the selected best systems to assign them randomly to players
+  const shuffledBest = [...bestSystems];
+  for (let i = shuffledBest.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [systemIndices[i], systemIndices[j]] = [systemIndices[j], systemIndices[i]];
+    [shuffledBest[i], shuffledBest[j]] = [shuffledBest[j], shuffledBest[i]];
   }
 
   processedPlayers.forEach((player, idx) => {
-    const sysIdx = systemIndices[idx % systemIndices.length];
-    const startingSys = systems[sysIdx];
+    if (shuffledBest.length === 0) return;
+    const startingSys = shuffledBest[idx % shuffledBest.length];
     startingSys.owner = player.id;
-    
+
     const startingShips: Record<string, number> = {};
     Object.keys(rules.ships).forEach(type => {
       startingShips[type] = rules.startingShips[type] || 0;
     });
     startingSys.ships = startingShips as any;
-    
+
     startingSys.shipyardLvl = 1;
     startingSys.sensorLvl = 2;
     startingSys.shieldsLvl = rules.enableUpgrades ? 1 : 0;
@@ -468,7 +542,7 @@ export function initializeGame(options: {
     };
   });
 
-  return {
+  const state: GameState = {
     gridWidth: width,
     gridHeight: height,
     systems,
@@ -481,6 +555,10 @@ export function initializeGame(options: {
     rules,
     turnStyle: options.turnStyle || 'simultaneous'
   };
+
+  reassignHomePlanets(state);
+
+  return state;
 }
 
 export function computeVision(gameState: GameState, playerId: number): {
@@ -1036,6 +1114,9 @@ export function processTurnEnd(gameState: GameState): void {
 
   gameState.fleets = survivingFleets;
 
+  // Reassign home planets after combat and captures but before checking player elimination
+  reassignHomePlanets(gameState);
+
   gameState.players.forEach(p => {
     const pState = gameState.playerState[p.id];
     if (pState.lost) return;
@@ -1055,6 +1136,60 @@ export function processTurnEnd(gameState: GameState): void {
   gameState.combatLog = [...newCombatLogs, ...gameState.combatLog].slice(0, 30);
   logAction(gameState, 0, 'process_turn_end', `Advanced to turn ${gameState.turnNumber + 1}`);
   gameState.turnNumber += 1;
+}
+
+export function reassignHomePlanets(gameState: GameState): void {
+  gameState.players.forEach(player => {
+    if (player.id === 0) return; // skip neutral
+    
+    // Find all systems currently owned by this player
+    const playerSystems = gameState.systems.filter(s => s.owner === player.id);
+    if (playerSystems.length === 0) {
+      return;
+    }
+    
+    // Check if player already has exactly one home planet in their currently owned systems
+    const currentHome = playerSystems.find(s => s.isHomePlanet);
+    if (currentHome) {
+      // Player already has an active home planet. Make sure no other systems of theirs are marked as home.
+      playerSystems.forEach(s => {
+        if (s.id !== currentHome.id) {
+          s.isHomePlanet = false;
+        }
+      });
+      return;
+    }
+    
+    // If the player does not have a home planet among their owned systems, select the best one
+    // Sorting criteria: shipyardLvl desc, sensorLvl desc, resourcesPerTurn desc, shieldsLvl desc, id asc
+    const sortedSystems = [...playerSystems].sort((a, b) => {
+      if (b.shipyardLvl !== a.shipyardLvl) return b.shipyardLvl - a.shipyardLvl;
+      if (b.sensorLvl !== a.sensorLvl) return b.sensorLvl - a.sensorLvl;
+      if (b.resourcesPerTurn !== a.resourcesPerTurn) return b.resourcesPerTurn - a.resourcesPerTurn;
+      if (b.shieldsLvl !== a.shieldsLvl) return b.shieldsLvl - a.shieldsLvl;
+      return a.id - b.id;
+    });
+    
+    const newHome = sortedSystems[0];
+    newHome.isHomePlanet = true;
+    
+    // Log the capital reassignment
+    logAction(gameState, player.id, 'capital_reassignment', `Established new capital planet at ${newHome.name}`);
+    
+    // Mark others as false just to be safe
+    playerSystems.forEach(s => {
+      if (s.id !== newHome.id) {
+        s.isHomePlanet = false;
+      }
+    });
+  });
+
+  // Clean up any neutral systems to ensure they are not marked as home planets
+  gameState.systems.forEach(s => {
+    if (s.owner === 0) {
+      s.isHomePlanet = false;
+    }
+  });
 }
 
 export function cancelDispatch(

@@ -124,6 +124,17 @@ export default function App() {
   const [alertMsg, setAlertMsg] = useState<string | null>(null);
   const [centerOnCoords, setCenterOnCoords] = useState<{ x: number; y: number; trigger: number } | null>(null);
 
+  // Clear target system if selection is cleared or if target system itself is selected
+  React.useEffect(() => {
+    if (selectedSystemId === null) {
+      if (targetSystem !== null) {
+        setTargetSystem(null);
+      }
+    } else if (targetSystem !== null && targetSystem.id === selectedSystemId) {
+      setTargetSystem(null);
+    }
+  }, [selectedSystemId, targetSystem]);
+
   // Transition tracking
   const [nextHumanPlayer, setNextHumanPlayer] = useState<PlayerSetup | null>(null);
 
@@ -2808,6 +2819,7 @@ export default function App() {
             setSelectedFleetId={setSelectedFleetId}
             onSelectTargetSystem={handleSelectTargetSystem}
             centerOnCoords={centerOnCoords}
+            targetSystemId={targetSystem?.id || null}
           />
           <Dashboard
             gameState={gameState}

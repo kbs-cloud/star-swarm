@@ -115,6 +115,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showActiveSwarms, setShowActiveSwarms] = useState(true);
   const [showTacticalQueue, setShowTacticalQueue] = useState(true);
 
+  const handleCenterOnHome = (playerId: number) => {
+    let homeSystem = gameState.systems.find(s => s.owner === playerId && s.isHomePlanet);
+    if (!homeSystem) {
+      homeSystem = gameState.systems.find(s => s.owner === playerId);
+    }
+    if (homeSystem) {
+      setSelectedSystemId(homeSystem.id);
+      onCenterOnCoords(homeSystem.x, homeSystem.y);
+    }
+  };
+
   if (!activePlayer) return null;
 
   const isMySystem = selectedSystem?.owner === activePlayerId;
@@ -398,14 +409,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {myPlayer ? (
                     <>
-                      <span style={{
-                        width: '10px',
-                        height: '10px',
-                        borderRadius: '50%',
-                        background: dotColor,
-                        display: 'inline-block',
-                        boxShadow: `0 0 6px ${dotColor}`
-                      }} />
+                      <span 
+                        onClick={() => handleCenterOnHome(myPlayer.id)}
+                        title="Center on Home Planet"
+                        style={{
+                          width: '12px',
+                          height: '12px',
+                          borderRadius: '50%',
+                          background: dotColor,
+                          display: 'inline-block',
+                          boxShadow: `0 0 8px ${dotColor}`,
+                          cursor: 'pointer',
+                          transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.3)';
+                          e.currentTarget.style.boxShadow = `0 0 12px 3px ${dotColor}`;
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                          e.currentTarget.style.boxShadow = `0 0 8px ${dotColor}`;
+                        }}
+                      />
                       <span style={{ color: 'white' }}>{myPlayer.name}</span>
                       {myState && !myState.lost && activeRules.enableCredits && (
                         <span style={{ fontSize: '12px', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono', marginLeft: '4px' }}>
@@ -432,13 +457,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {isMyTurn ? '▶ YOUR TURN' : 'ACTIVE FACTION'}
             </div>
             <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{
-                width: '10px',
-                height: '10px',
-                borderRadius: '50%',
-                background: activePlayer.color || '#ffffff',
-                display: 'inline-block'
-              }} />
+              <span 
+                onClick={() => handleCenterOnHome(activePlayer.id)}
+                title={`Center on ${activePlayer.name}'s Home Planet`}
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: activePlayer.color || '#ffffff',
+                  display: 'inline-block',
+                  boxShadow: `0 0 8px ${activePlayer.color || '#ffffff'}`,
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.3)';
+                  e.currentTarget.style.boxShadow = `0 0 12px 3px ${activePlayer.color || '#ffffff'}`;
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = `0 0 8px ${activePlayer.color || '#ffffff'}`;
+                }}
+              />
               <span style={{ color: isMyTurn ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
                 {activePlayer.name}
               </span>
@@ -635,7 +675,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>STAR CLUSTER TELEMETRY</span>
-                <h2 className="text-neon-cyan" style={{ fontSize: '22px', margin: '4px 0' }}>{selectedSystem.name}</h2>
+                <h2 className="text-neon-cyan" style={{ fontSize: '22px', margin: '4px 0', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {selectedSystem.isHomePlanet && <span title="Capital Planet" style={{ fontSize: '18px' }}>👑</span>}
+                  {selectedSystem.name}
+                  {selectedSystem.isHomePlanet && (
+                    <span style={{
+                      fontSize: '10px',
+                      background: 'rgba(0, 240, 255, 0.15)',
+                      color: 'var(--accent-cyan)',
+                      border: '1px solid rgba(0, 240, 255, 0.3)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontFamily: 'Share Tech Mono',
+                      letterSpacing: '1px'
+                    }}>
+                      CAPITAL
+                    </span>
+                  )}
+                </h2>
               </div>
               <button
                 className="btn-sci-fi btn-danger"
@@ -1253,7 +1310,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 color: 'var(--text-secondary)',
                 fontSize: '12px'
               }}>
-                To deploy a traveling swarm, select a base you own, then click on any other star system on the map to set it as destination.
+                To deploy a traveling swarm, select a base you own, then Ctrl + left-click on any other star system on the map to set it as destination.
               </div>
             )}
           </div>
@@ -1285,13 +1342,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   fontSize: '12px'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                    <div style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: player.color || '#ffffff',
-                      boxShadow: `0 0 6px ${player.color}`
-                    }} />
+                    <div 
+                      onClick={() => handleCenterOnHome(player.id)}
+                      title={`Center on ${player.name}'s Home Planet`}
+                      style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        background: player.color || '#ffffff',
+                        boxShadow: `0 0 6px ${player.color}`,
+                        cursor: 'pointer',
+                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                      }} 
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.4)';
+                        e.currentTarget.style.boxShadow = `0 0 10px 2.5px ${player.color}`;
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
+                        e.currentTarget.style.boxShadow = `0 0 6px ${player.color}`;
+                      }}
+                    />
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         {isPlayerLocalToClient(player) ? (
@@ -1523,7 +1594,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   return (
                     <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                       <span style={{ color: p.color || 'white', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: p.color }} />
+                        <span 
+                          onClick={() => handleCenterOnHome(p.id)}
+                          title={`Center on ${p.name}'s Home Planet`}
+                          style={{ 
+                            width: '8px', 
+                            height: '8px', 
+                            borderRadius: '50%', 
+                            background: p.color,
+                            cursor: 'pointer',
+                            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                            display: 'inline-block',
+                            boxShadow: `0 0 4px ${p.color}`
+                          }} 
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.4)';
+                            e.currentTarget.style.boxShadow = `0 0 8px 2px ${p.color}`;
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                            e.currentTarget.style.boxShadow = `0 0 4px ${p.color}`;
+                          }}
+                        />
                         {p.name}
                       </span>
                       <span className="telemetry" style={{ color: p.endedTurn ? 'var(--accent-green)' : 'var(--accent-yellow)' }}>
