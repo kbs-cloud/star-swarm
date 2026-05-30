@@ -16,7 +16,7 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
 - **Secrecy Gate for Hotseat Multiplayer**: Screen lockdown and secrecy gates that hide sensor layouts and system statistics between turns to prevent screen-peeping during hotseat matches.
 - **Simulated AI Factions**: Automated skirmish opponents with intelligent expansion, system upgrades, and tactical fleet dispatches.
 - **Commander Profiles & Turn Recovery**: Customize global display names in the settings panel, rename factions, and manually rename game simulations mid-game. Instantly cancel accidentally ended turns from local/remote waiting screens or directly from the Concourse home screen.
-- **Sci-Fi Glassmorphic UI**: Premium retro-futuristic telemetry panels, real-time alerts, system dashboards, and diagnostic logs built with outfit typography. Includes an interactive notification stack alerting players of turn starts and finished production projects with click-to-locate integration.
+- **Sci-Fi Glassmorphic UI**: Premium retro-futuristic telemetry panels, real-time alerts, system dashboards, and diagnostic logs built with outfit typography. Includes an interactive notification stack alerting players of turn starts and finished production projects with click-to-locate integration, and turn-start sound effects with a mute toggle.
 - **Playwright Test Suite**: End-to-end integration tests that validate lobby configuration, Turn/HUD loops, AI progression, and rendering.
 
 

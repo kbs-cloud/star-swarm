@@ -30,6 +30,8 @@ interface DashboardProps {
   onAssignPlayerEmail: (playerId: number, email: string) => void;
   gameName: string;
   onRenameGame: (newName: string) => void;
+  soundMuted: boolean;
+  onToggleSoundMuted: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -61,6 +63,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onAssignPlayerEmail,
   gameName,
   onRenameGame,
+  soundMuted,
+  onToggleSoundMuted,
 }) => {
   const activePlayer = gameState.playerState[activePlayerId];
   const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId) || null;
@@ -650,6 +654,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>GALACTIC TURN</div>
             <div className="telemetry" style={{ fontSize: '16px', fontWeight: 'bold' }}>#{gameState.turnNumber}</div>
           </div>
+          <button
+            className="btn-sci-fi"
+            onClick={onToggleSoundMuted}
+            style={{ 
+              padding: '12px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              width: '45px',
+              height: '45px',
+              minWidth: '45px'
+            }}
+            title={soundMuted ? "Unmute Sound Effects" : "Mute Sound Effects"}
+          >
+            {soundMuted ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <line x1="23" y1="9" x2="17" y2="15"></line>
+                <line x1="17" y1="9" x2="23" y2="15"></line>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+            )}
+          </button>
           <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: '12px 18px', fontWeight: 'bold' }}>
             HOME
           </button>

@@ -91,6 +91,23 @@ export default function App() {
   const [overrideSightRange, setOverrideSightRange] = useState<boolean>(false);
   const [customSightRange, setCustomSightRange] = useState<number>(6.0);
   
+  const [soundMuted, setSoundMuted] = useState<boolean>(() => {
+    return localStorage.getItem('starswarm_sound_muted') === 'true';
+  });
+
+  const toggleSoundMuted = () => {
+    setSoundMuted(prev => {
+      const next = !prev;
+      localStorage.setItem('starswarm_sound_muted', String(next));
+      return next;
+    });
+  };
+
+  const soundMutedRef = React.useRef(soundMuted);
+  React.useEffect(() => {
+    soundMutedRef.current = soundMuted;
+  }, [soundMuted]);
+  
   // Persistent Database Game States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [activeGameName, setActiveGameName] = useState<string>('');
@@ -770,6 +787,19 @@ export default function App() {
               createdAt: Date.now()
             });
           });
+
+          // Play turn-start sound effect if not muted
+          if (!soundMutedRef.current) {
+            try {
+              const audio = new Audio('/turn-start.mp3');
+              audio.volume = 0.45;
+              audio.play().catch(err => {
+                console.warn('Audio playback failed:', err);
+              });
+            } catch (err) {
+              console.warn('Audio context initialization failed:', err);
+            }
+          }
 
           if (isTurnChanged) {
             gameState.systems.forEach(newSys => {
@@ -3017,6 +3047,8 @@ export default function App() {
             onClaimFaction={handleClaimFaction}
             onTogglePlayerLocal={handleTogglePlayerLocal}
             onAssignPlayerEmail={handleAssignPlayerEmail}
+            soundMuted={soundMuted}
+            onToggleSoundMuted={toggleSoundMuted}
           />
 
           {/* IN-GAME JOIN REQUEST PANEL (host only) */}
