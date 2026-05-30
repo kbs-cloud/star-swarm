@@ -169,4 +169,69 @@ test.describe('Game State Engine - Spacing Optimization', () => {
     expect(sys2.isHomePlanet).toBe(true);
     expect(sys3.isHomePlanet).toBeFalsy();
   });
+
+  test('should generate identical layout when given the same seed', () => {
+    const players = [
+      { id: 1, type: 'human' as const, team: 1, name: 'P1' },
+      { id: 2, type: 'ai' as const, team: 2, name: 'P2' }
+    ];
+
+    const seed = 'test-star-swarm-seed-123';
+
+    const state1 = initializeGame({
+      numSystems: 8,
+      players,
+      seed
+    });
+
+    const state2 = initializeGame({
+      numSystems: 8,
+      players,
+      seed
+    });
+
+    // Check that positions and names are identical
+    expect(state1.systems).toHaveLength(8);
+    expect(state2.systems).toHaveLength(8);
+
+    for (let i = 0; i < 8; i++) {
+      const s1 = state1.systems[i];
+      const s2 = state2.systems[i];
+      expect(s1.name).toBe(s2.name);
+      expect(s1.x).toBe(s2.x);
+      expect(s1.y).toBe(s2.y);
+      expect(s1.owner).toBe(s2.owner);
+      expect(s1.resourcesPerTurn).toBe(s2.resourcesPerTurn);
+      expect(s1.ships).toEqual(s2.ships);
+    }
+  });
+
+  test('should generate different layouts when given different seeds', () => {
+    const players = [
+      { id: 1, type: 'human' as const, team: 1, name: 'P1' },
+      { id: 2, type: 'ai' as const, team: 2, name: 'P2' }
+    ];
+
+    const state1 = initializeGame({
+      numSystems: 8,
+      players,
+      seed: 'seed-alpha'
+    });
+
+    const state2 = initializeGame({
+      numSystems: 8,
+      players,
+      seed: 'seed-beta'
+    });
+
+    // Check that at least some system positions differ
+    let coordinateDiffers = false;
+    for (let i = 0; i < 8; i++) {
+      if (state1.systems[i].x !== state2.systems[i].x || state1.systems[i].y !== state2.systems[i].y) {
+        coordinateDiffers = true;
+        break;
+      }
+    }
+    expect(coordinateDiffers).toBe(true);
+  });
 });

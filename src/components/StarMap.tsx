@@ -142,10 +142,9 @@ export const StarMap: React.FC<StarMapProps> = ({
       const alliedPlayerIds = gameState.players
         .filter(p => p.team === gameState.playerState[activePlayerId]?.team)
         .map(p => p.id);
-
       gameState.systems.forEach(sys => {
         if (alliedPlayerIds.includes(sys.owner)) {
-          const sensorRadius = (6.0 + sys.sensorLvl * 2.5) * cellSize;
+          const sensorRadius = ((gameState.rules?.starSightRange ?? 6.0) + sys.sensorLvl * 2.5) * cellSize;
           ctx.beginPath();
           ctx.arc(sys.x * cellSize, sys.y * cellSize, sensorRadius, 0, Math.PI * 2);
           ctx.fill();

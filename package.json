@@ -1,7 +1,7 @@
 {
   "name": "starswarm",
   "private": true,
-  "version": "0.13.2",
+  "version": "0.14.0",
   "type": "module",
   "scripts": {
     "dev": "npx tsc src/game/gameState.ts src/game/ai.ts --outDir src/game/dist --module commonjs --target es2022 --moduleResolution node --noEmit false --esModuleInterop --ignoreConfig --ignoreDeprecations 6.0 && concurrently \"node server.cjs\" \"vite\"",

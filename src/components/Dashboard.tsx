@@ -592,50 +592,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
           ) : (
-            <div 
-              onClick={() => setIsEditingName(true)}
-              style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '8px', 
-                cursor: 'pointer',
-                userSelect: 'none',
-                minWidth: 0
-              }}
-              title="Click to rename game"
-            >
-              <span style={{
-                fontSize: '13px',
-                fontWeight: 'bold',
-                fontFamily: 'Orbitron, sans-serif',
-                letterSpacing: '1px',
-                color: 'white',
-                textShadow: '0 0 6px rgba(255, 255, 255, 0.15)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                maxWidth: '300px'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = 'var(--accent-cyan)';
-                e.currentTarget.style.textShadow = '0 0 8px rgba(0, 240, 255, 0.4)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'white';
-                e.currentTarget.style.textShadow = '0 0 6px rgba(255, 255, 255, 0.15)';
-              }}
-              >
-                {gameName || 'UNNAMED SIMULATION'}
-              </span>
-              <span 
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div 
+                onClick={() => setIsEditingName(true)}
                 style={{ 
-                  fontSize: '11px', 
-                  opacity: 0.5,
-                  transition: 'opacity 0.2s',
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '8px', 
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  minWidth: 0
                 }}
+                title="Click to rename game"
               >
-                ✏️
-              </span>
+                <span style={{
+                  fontSize: '13px',
+                  fontWeight: 'bold',
+                  fontFamily: 'Orbitron, sans-serif',
+                  letterSpacing: '1px',
+                  color: 'white',
+                  textShadow: '0 0 6px rgba(255, 255, 255, 0.15)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '300px'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.color = 'var(--accent-cyan)';
+                  e.currentTarget.style.textShadow = '0 0 8px rgba(0, 240, 255, 0.4)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.color = 'white';
+                  e.currentTarget.style.textShadow = '0 0 6px rgba(255, 255, 255, 0.15)';
+                }}
+                >
+                  {gameName || 'UNNAMED SIMULATION'}
+                </span>
+                <span 
+                  style={{ 
+                    fontSize: '11px', 
+                    opacity: 0.5,
+                    transition: 'opacity 0.2s',
+                  }}
+                >
+                  ✏️
+                </span>
+              </div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', marginTop: '2px' }}>
+                RULES: {gameState.rules?.name || 'CUSTOM'} · SEED: {gameState.seed || 'NONE'} · SIGHT: {gameState.rules?.starSightRange ?? 6.0} LY
+              </div>
             </div>
           )}
         </div>

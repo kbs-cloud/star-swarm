@@ -45,6 +45,7 @@ export interface GameRules {
   };
   ships: Record<string, ShipDef>;
   upgrades: Record<string, UpgradeDef>;
+  starSightRange?: number;
 }
 
 export interface BuildJob {
@@ -182,6 +183,32 @@ export interface GameState {
   actionLog?: ActionLogEntry[];
   rules?: GameRules;
   turnStyle?: 'simultaneous' | 'sequential';
+  seed?: string | number;
+  rngState?: number;
+}
+
+export function hashSeed(seed: string | number | undefined): number {
+  if (seed === undefined || seed === null || seed === '') {
+    return Math.floor(Math.random() * 2147483647);
+  }
+  if (typeof seed === 'number') {
+    return seed | 0;
+  }
+  let hash = 0;
+  const str = String(seed);
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+export function seededRandom(state: GameState): number {
+  if (state.rngState === undefined) {
+    state.rngState = hashSeed(state.seed);
+  }
+  state.rngState = (state.rngState * 1664525 + 1013904223) | 0;
+  return (state.rngState >>> 0) / 4294967296;
 }
 
 export const SHIP_TYPES: Record<string, ShipDef> = {
@@ -282,7 +309,8 @@ export const NORMAL_RULES: GameRules = {
     shipType: ''
   },
   ships: SHIP_TYPES,
-  upgrades: UPGRADES
+  upgrades: UPGRADES,
+  starSightRange: 6.0
 };
 
 export const SIMPLE_RULES: GameRules = {
@@ -323,7 +351,8 @@ export const SIMPLE_RULES: GameRules = {
       description: 'Basic combat unit. Captures nodes and attacks enemies.'
     }
   },
-  upgrades: {}
+  upgrades: {},
+  starSightRange: 6.0
 };
 
 export const FACTION_INFO: Record<number, { name: string; color: string; team: number }> = {
@@ -353,6 +382,7 @@ export function initializeGame(options: {
   players?: Player[];
   rules?: GameRules;
   turnStyle?: 'simultaneous' | 'sequential';
+  seed?: string | number;
 } = {}): GameState {
   const rules = options.rules || NORMAL_RULES;
   const width = options.gridWidth || 60;
@@ -365,6 +395,13 @@ export function initializeGame(options: {
     { id: 4, type: 'ai', team: 4, name: 'Void AI', isLocal: false, assignedEmail: null, endedTurn: false }
   ];
 
+  const seedVal = options.seed !== undefined ? options.seed : Math.floor(Math.random() * 2147483647);
+  let localRngState = hashSeed(seedVal);
+  const nextRandom = () => {
+    localRngState = (localRngState * 1664525 + 1013904223) | 0;
+    return (localRngState >>> 0) / 4294967296;
+  };
+
   const systems: StarSystem[] = [];
   const minDistance = 8.0;
 
@@ -373,8 +410,8 @@ export function initializeGame(options: {
     let attempts = 0;
 
     do {
-      x = Math.floor(Math.random() * (width - 8)) + 4;
-      y = Math.floor(Math.random() * (height - 8)) + 4;
+      x = Math.floor(nextRandom() * (width - 8)) + 4;
+      y = Math.floor(nextRandom() * (height - 8)) + 4;
       tooClose = false;
 
       for (const sys of systems) {
@@ -405,7 +442,7 @@ export function initializeGame(options: {
       sensorLvl: 1,
       shieldsLvl: 0,
       buildQueue: [],
-      resourcesPerTurn: rules.resourcesPerTurn.base + Math.floor(Math.random() * (rules.resourcesPerTurn.randomAdd + 1))
+      resourcesPerTurn: rules.resourcesPerTurn.base + Math.floor(nextRandom() * (rules.resourcesPerTurn.randomAdd + 1))
     });
   }
 
@@ -496,7 +533,7 @@ export function initializeGame(options: {
   // Shuffle the selected best systems to assign them randomly to players
   const shuffledBest = [...bestSystems];
   for (let i = shuffledBest.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(nextRandom() * (i + 1));
     [shuffledBest[i], shuffledBest[j]] = [shuffledBest[j], shuffledBest[i]];
   }
 
@@ -519,7 +556,7 @@ export function initializeGame(options: {
   systems.forEach(sys => {
     if (sys.owner === 0) {
       const range = rules.neutralStartingShipsRange;
-      const count = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+      const count = Math.floor(nextRandom() * (range.max - range.min + 1)) + range.min;
       if (sys.ships[range.type] !== undefined) {
         sys.ships[range.type] = count;
       }
@@ -553,7 +590,9 @@ export function initializeGame(options: {
     activePlayerIdx: 0,
     combatLog: [],
     rules,
-    turnStyle: options.turnStyle || 'simultaneous'
+    turnStyle: options.turnStyle || 'simultaneous',
+    seed: seedVal,
+    rngState: localRngState
   };
 
   reassignHomePlanets(state);
@@ -597,7 +636,7 @@ export function computeVision(gameState: GameState, playerId: number): {
   gameState.systems.forEach(sys => {
     if (alliedPlayerIds.includes(sys.owner)) {
       visibleSystems.add(sys.id);
-      const sensorRadius = 6.0 + (sys.sensorLvl || 1) * 2.5;
+      const sensorRadius = (gameState.rules?.starSightRange ?? 6.0) + (sys.sensorLvl || 1) * 2.5;
       markCircleVisible(sys.x, sys.y, sensorRadius);
     }
   });
@@ -851,7 +890,8 @@ export function resolveCombat(
   attackerShips: Record<string, number>,
   defenderShips: Record<string, number>,
   defenderShieldsLvl = 0,
-  shipDefs: Record<string, ShipDef> = SHIP_TYPES
+  shipDefs: Record<string, ShipDef> = SHIP_TYPES,
+  gameState?: GameState
 ): CombatReport {
   const log: CombatRound[] = [];
   const startAttacker = { ...attackerShips };
@@ -860,6 +900,8 @@ export function resolveCombat(
   let round = 1;
   const aShips = { ...attackerShips };
   const dShips = { ...defenderShips };
+
+  const getRand = () => gameState ? seededRandom(gameState) : Math.random();
 
   while (
     Object.values(aShips).reduce((a, b) => a + b, 0) > 0 &&
@@ -874,7 +916,7 @@ export function resolveCombat(
       const def = shipDefs[type] || SHIP_TYPES[type];
       if (!def) continue;
       for (let i = 0; i < qty; i++) {
-        if (Math.random() < def.hitChance) {
+        if (getRand() < def.hitChance) {
           attackerHits += def.attack;
         }
       }
@@ -885,7 +927,7 @@ export function resolveCombat(
       const def = shipDefs[type] || SHIP_TYPES[type];
       if (!def) continue;
       for (let i = 0; i < qty; i++) {
-        if (Math.random() < def.hitChance) {
+        if (getRand() < def.hitChance) {
           defenderHits += def.attack;
         }
       }
@@ -1046,7 +1088,8 @@ export function processTurnEnd(gameState: GameState): void {
           fleet.ships,
           system.ships,
           system.owner === 0 ? 0 : system.shieldsLvl,
-          activeRules.ships
+          activeRules.ships,
+          gameState
         );
 
         newCombatLogs.push({

@@ -87,6 +87,9 @@ export default function App() {
   const [gridSize, setGridSize] = useState<number>(60);
   const [systemCount, setSystemCount] = useState<number>(18);
   const [turnStyle, setTurnStyle] = useState<'simultaneous' | 'sequential'>('simultaneous');
+  const [gameSeed, setGameSeed] = useState<string>(() => String(Math.floor(Math.random() * 900000) + 100000));
+  const [overrideSightRange, setOverrideSightRange] = useState<boolean>(false);
+  const [customSightRange, setCustomSightRange] = useState<number>(6.0);
   
   // Persistent Database Game States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -133,6 +136,14 @@ export default function App() {
   // Game Modes State
   const [gameModes, setGameModes] = useState<GameRules[]>([]);
   const [selectedModeId, setSelectedModeId] = useState<string>('normal');
+
+  React.useEffect(() => {
+    const mode = gameModes.find(m => m.id === selectedModeId);
+    if (mode) {
+      setCustomSightRange(mode.starSightRange ?? 6.0);
+    }
+  }, [selectedModeId, gameModes]);
+
   const [isRulesEditorOpen, setIsRulesEditorOpen] = useState(false);
   const [editingRules, setEditingRules] = useState<GameRules | null>(null);
   const [newShipTypeKey, setNewShipTypeKey] = useState('');
@@ -1082,6 +1093,7 @@ export default function App() {
       if (migratedRules.enableUpgrades === undefined) migratedRules.enableUpgrades = true;
       if (migratedRules.captureRequiresColonyShip === undefined) migratedRules.captureRequiresColonyShip = true;
       if (migratedRules.startingResources === undefined) migratedRules.startingResources = 60;
+      if (migratedRules.starSightRange === undefined) migratedRules.starSightRange = 6.0;
       
       if (!migratedRules.resourcesPerTurn) {
         migratedRules.resourcesPerTurn = { base: 15, randomAdd: 10 };
@@ -1176,13 +1188,18 @@ export default function App() {
     }
 
     const activeRules = gameModes.find(m => m.id === selectedModeId) || NORMAL_RULES;
+    const finalRules = {
+      ...activeRules,
+      starSightRange: overrideSightRange ? customSightRange : (activeRules.starSightRange ?? 6.0)
+    };
     const setupOptions = {
       gridWidth: gridSize,
       gridHeight: gridSize,
       numSystems: systemCount,
       players: updatedSetup,
-      rules: activeRules,
-      turnStyle: turnStyle
+      rules: finalRules,
+      turnStyle: turnStyle,
+      seed: gameSeed
     };
     const initialized = initializeGame(setupOptions);
     
@@ -2553,6 +2570,64 @@ export default function App() {
               </div>
             </div>
 
+            {/* SEED & VISION CONFIG */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>GALAXY GENERATION SEED</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
+                  <input
+                    type="text"
+                    value={gameSeed}
+                    onChange={(e) => setGameSeed(e.target.value)}
+                    placeholder="Enter custom seed"
+                    style={{
+                      flex: 1,
+                      background: 'rgba(0,0,0,0.5)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      color: 'white',
+                      padding: '6px 10px',
+                      borderRadius: '4px',
+                      fontSize: '13px',
+                      fontFamily: 'Share Tech Mono'
+                    }}
+                  />
+                  <button
+                    className="btn-sci-fi"
+                    onClick={() => setGameSeed(String(Math.floor(Math.random() * 900000) + 100000))}
+                    style={{ padding: '6px 12px', fontSize: '11px' }}
+                  >
+                    RANDOM
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={overrideSightRange}
+                    onChange={(e) => setOverrideSightRange(e.target.checked)}
+                    style={{ accentColor: 'var(--accent-cyan)' }}
+                  />
+                  <span>OVERRIDE STAR SIGHT RANGE</span>
+                </label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '6px' }}>
+                  <input
+                    type="range"
+                    min="1"
+                    max="20"
+                    step="0.5"
+                    disabled={!overrideSightRange}
+                    value={customSightRange}
+                    onChange={(e) => setCustomSightRange(parseFloat(e.target.value))}
+                    style={{ flex: 1, accentColor: 'var(--accent-cyan)', opacity: overrideSightRange ? 1 : 0.4 }}
+                  />
+                  <span className="telemetry" style={{ width: '60px', textAlign: 'right', opacity: overrideSightRange ? 1 : 0.4 }}>
+                    {customSightRange} LY
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* GAME RULES CONFIG */}
             <div style={{ background: 'rgba(255,255,255,0.01)', padding: '15px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
               <label style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', display: 'block', marginBottom: '8px' }}>
@@ -3897,6 +3972,23 @@ export default function App() {
                 </div>
 
                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>BASE STAR SIGHT RANGE</label>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="range"
+                      min="1"
+                      max="20"
+                      step="0.5"
+                      disabled={editingRules.isDefault}
+                      value={editingRules.starSightRange ?? 6.0}
+                      onChange={(e) => setEditingRules({ ...editingRules, starSightRange: parseFloat(e.target.value) || 6.0 })}
+                      style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
+                    />
+                    <span className="telemetry" style={{ width: '50px', textAlign: 'right', fontSize: '12px' }}>{editingRules.starSightRange ?? 6.0} LY</span>
+                  </div>
+                </div>
+
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>NEUTRAL DEFENSE COMPOSITION</label>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr', gap: '8px' }}>
                     <div>
@@ -4458,6 +4550,22 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>BASE STAR SIGHT RANGE</label>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="range"
+                      min="1"
+                      max="20"
+                      step="0.5"
+                      value={importRulesPreview.starSightRange ?? 6.0}
+                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, starSightRange: parseFloat(e.target.value) || 6.0 })}
+                      style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
+                    />
+                    <span className="telemetry" style={{ width: '50px', textAlign: 'right', fontSize: '12px' }}>{importRulesPreview.starSightRange ?? 6.0} LY</span>
+                  </div>
                 </div>
 
                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>

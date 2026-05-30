@@ -1,5 +1,5 @@
 // Star-Swarm AI Decision Engine (TypeScript)
-import { GameState, dispatchFleet, upgradeSystem, queueShipProduction } from './gameState';
+import { GameState, dispatchFleet, upgradeSystem, queueShipProduction, seededRandom } from './gameState';
 
 /**
  * Executes a turn for an AI player.
@@ -32,7 +32,7 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
 
   // 1. Tech Upgrades
   // AI upgrades Hyperdrive occasionally if it has plenty of resources and upgrades are enabled
-  if (activeRules.enableUpgrades && activeRules.enableCredits && aiState.resources > 80 && Math.random() < 0.3) {
+  if (activeRules.enableUpgrades && activeRules.enableCredits && aiState.resources > 80 && seededRandom(gameState) < 0.3) {
     const hyperdriveLvl = aiState.tech.Hyperdrive || 0;
     const hyperdriveDef = activeRules.upgrades?.Hyperdrive || { baseCost: 50, multiplier: 2.0 };
     const hyperdriveCost = Math.round(hyperdriveDef.baseCost * (hyperdriveDef.multiplier ** hyperdriveLvl));
@@ -46,19 +46,19 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
     if (activeRules.enableUpgrades) {
       const shipyardDef = activeRules.upgrades?.Shipyard || { baseCost: 30, multiplier: 1.6 };
       const shipyardCost = Math.round(shipyardDef.baseCost * (shipyardDef.multiplier ** (sys.shipyardLvl - 1)));
-      if ((!activeRules.enableCredits || aiState.resources > shipyardCost + 30) && sys.shipyardLvl < 4 && Math.random() < 0.25) {
+      if ((!activeRules.enableCredits || aiState.resources > shipyardCost + 30) && sys.shipyardLvl < 4 && seededRandom(gameState) < 0.25) {
         upgradeSystem(gameState, aiPlayerId, sys.id, 'Shipyard');
       }
 
       const shieldsDef = activeRules.upgrades?.Shields || { baseCost: 35, multiplier: 1.7 };
       const shieldsCost = Math.round(shieldsDef.baseCost * (shieldsDef.multiplier ** sys.shieldsLvl));
-      if ((!activeRules.enableCredits || aiState.resources > shieldsCost + 30) && sys.shieldsLvl < 3 && Math.random() < 0.25) {
+      if ((!activeRules.enableCredits || aiState.resources > shieldsCost + 30) && sys.shieldsLvl < 3 && seededRandom(gameState) < 0.25) {
         upgradeSystem(gameState, aiPlayerId, sys.id, 'Shields');
       }
 
       const sensorDef = activeRules.upgrades?.Sensors || { baseCost: 25, multiplier: 1.5 };
       const sensorCost = Math.round(sensorDef.baseCost * (sensorDef.multiplier ** (sys.sensorLvl - 1)));
-      if ((!activeRules.enableCredits || aiState.resources > sensorCost + 40) && sys.sensorLvl < 3 && Math.random() < 0.15) {
+      if ((!activeRules.enableCredits || aiState.resources > sensorCost + 40) && sys.sensorLvl < 3 && seededRandom(gameState) < 0.15) {
         upgradeSystem(gameState, aiPlayerId, sys.id, 'Sensors');
       }
     }
@@ -81,11 +81,11 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
             const hasColonyInSys = (sys.ships.Colony || 0) > 0;
             const countColonyInQueued = sys.buildQueue.filter(q => q.shipType === 'Colony').length;
 
-            if (!hasColonyInSys && countColonyInQueued === 0 && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Colony.cost) && Math.random() < 0.6) {
+            if (!hasColonyInSys && countColonyInQueued === 0 && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Colony.cost) && seededRandom(gameState) < 0.6) {
               shipToBuild = 'Colony';
-            } else if (activeRules.ships.Cruiser && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Cruiser.cost) && Math.random() < 0.35) {
+            } else if (activeRules.ships.Cruiser && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Cruiser.cost) && seededRandom(gameState) < 0.35) {
               shipToBuild = 'Cruiser';
-            } else if (activeRules.ships.Scout && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Scout.cost) && Math.random() < 0.2) {
+            } else if (activeRules.ships.Scout && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Scout.cost) && seededRandom(gameState) < 0.2) {
               shipToBuild = 'Scout';
             } else if (activeRules.ships.Fighter && (!activeRules.enableCredits || aiState.resources >= activeRules.ships.Fighter.cost)) {
               shipToBuild = 'Fighter';
@@ -94,7 +94,7 @@ export function runAITurn(gameState: GameState, aiPlayerId: number): void {
             // General selection
             const affordableShips = shipTypes.filter(type => !activeRules.enableCredits || aiState.resources >= activeRules.ships[type].cost);
             if (affordableShips.length === 0) break;
-            shipToBuild = affordableShips[Math.floor(Math.random() * affordableShips.length)];
+            shipToBuild = affordableShips[Math.floor(seededRandom(gameState) * affordableShips.length)];
           }
 
           const buildRes = queueShipProduction(gameState, aiPlayerId, sys.id, shipToBuild);
