@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player, NORMAL_RULES } from '../game/gameState';
+import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player, NORMAL_RULES, ActionLogEntry } from '../game/gameState';
 
 interface DashboardProps {
   gameState: GameState;
@@ -81,6 +81,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // State for active combat log expanded index
   const [selectedBattleLogIndex, setSelectedBattleLogIndex] = useState<number | null>(null);
+  const [logTab, setLogTab] = useState<'tactical' | 'actions'>('tactical');
 
   // Collapsible panels for Strategic Command
   const [showDominion, setShowDominion] = useState(true);
@@ -274,6 +275,49 @@ export const Dashboard: React.FC<DashboardProps> = ({
           }
 
           return null;
+        })}
+      </div>
+    );
+  };
+
+  const renderActionLog = () => {
+    const actionLog = gameState.actionLog || [];
+    if (actionLog.length === 0) {
+      return <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No command actions logged.</div>;
+    }
+
+    const sortedLog = [...actionLog].reverse();
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto' }}>
+        {sortedLog.map((log, idx) => {
+          const timestampStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const playerColor = gameState.playerState[log.playerId]?.color || '#ffffff';
+          
+          return (
+            <div key={idx} style={{
+              background: 'rgba(0, 240, 255, 0.03)',
+              border: '1px solid rgba(0, 240, 255, 0.1)',
+              borderRadius: '6px',
+              padding: '6px 8px',
+              fontSize: '11px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="telemetry" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+                  TURN {log.turnNumber} · {timestampStr}
+                </span>
+                <span style={{ color: playerColor, fontWeight: 'bold' }}>
+                  {log.playerName}
+                </span>
+              </div>
+              <div style={{ color: 'var(--text-secondary)', fontFamily: 'Share Tech Mono' }}>
+                {log.details}
+              </div>
+            </div>
+          );
         })}
       </div>
     );
@@ -1195,10 +1239,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* COMBAT AND INTELLIGENCE EVENTS LOG */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px' }} className="glass-panel">
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>TACTICAL REPORT LOGS</span>
-          <h2 className="text-neon-magenta" style={{ fontSize: '18px', margin: '4px 0 10px' }}>GALACTIC TELEMETRY</h2>
-          {renderCombatLog()}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', minHeight: 0 }} className="glass-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>TACTICAL REPORT LOGS</span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                className="btn-sci-fi"
+                style={{ 
+                  padding: '2px 8px', 
+                  fontSize: '9px', 
+                  background: logTab === 'tactical' ? 'rgba(255, 0, 127, 0.25)' : 'transparent',
+                  borderColor: logTab === 'tactical' ? 'var(--accent-magenta)' : 'rgba(255, 255, 255, 0.15)',
+                  color: logTab === 'tactical' ? 'white' : 'var(--text-secondary)'
+                }}
+                onClick={() => setLogTab('tactical')}
+              >
+                TACTICAL
+              </button>
+              <button 
+                className="btn-sci-fi"
+                style={{ 
+                  padding: '2px 8px', 
+                  fontSize: '9px', 
+                  background: logTab === 'actions' ? 'rgba(0, 240, 255, 0.25)' : 'transparent',
+                  borderColor: logTab === 'actions' ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.15)',
+                  color: logTab === 'actions' ? 'white' : 'var(--text-secondary)'
+                }}
+                onClick={() => setLogTab('actions')}
+              >
+                ACTIONS
+              </button>
+            </div>
+          </div>
+          <h2 className="text-neon-magenta" style={{ fontSize: '18px', margin: '0 0 10px 0' }}>GALACTIC TELEMETRY</h2>
+          {logTab === 'tactical' ? renderCombatLog() : renderActionLog()}
         </div>
       </div>
 

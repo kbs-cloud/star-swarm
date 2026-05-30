@@ -96,6 +96,8 @@ function initializeTables() {
         )
       `, (createErr) => {
         if (createErr) console.error('join_requests create error:', createErr.message);
+        // Run anonymous games cleanup on startup after table initialization
+        cleanupAnonymousGames();
       });
     });
   });
@@ -183,6 +185,25 @@ setInterval(() => {
     }
   });
 }, 10 * 60 * 1000); // Every 10 minutes
+
+// Clean up inactive anonymous games (owner_email is null and no updates for 1 week)
+function cleanupAnonymousGames() {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  db.run(
+    'DELETE FROM games WHERE owner_email IS NULL AND datetime(updated_at) < datetime(?)',
+    [cutoff],
+    function (err) {
+      if (err) {
+        console.error('Failed to clean up inactive anonymous games:', err.message);
+      } else if (this.changes > 0) {
+        console.log(`Cleaned up ${this.changes} inactive anonymous games (inactive for > 1 week).`);
+      }
+    }
+  );
+}
+
+// Run hourly cleanup of inactive anonymous games
+setInterval(cleanupAnonymousGames, 60 * 60 * 1000);
 
 // CSRF Handshake endpoint (Initializes CSRF cookies on SPA mount)
 app.get('/api/csrf-init', (req, res) => {
@@ -686,9 +707,10 @@ app.post('/api/games', validateCSRF, (req, res) => {
       }
       
       const ownerEmail = user ? user.email : null;
+      const now = new Date().toISOString();
       db.run(
-        'INSERT INTO games (id, invite_code, owner_email, name, game_state) VALUES (?, ?, ?, ?, ?)',
-        [gameId, inviteCode, ownerEmail, name.trim(), gameStateStr],
+        'INSERT INTO games (id, invite_code, owner_email, name, game_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [gameId, inviteCode, ownerEmail, name.trim(), gameStateStr, now, now],
         function (insertErr) {
           if (insertErr) {
             console.error('Error creating game:', insertErr.message);

@@ -159,6 +159,15 @@ export interface GameEvent {
   results?: CombatReport;
 }
 
+export interface ActionLogEntry {
+  timestamp: string;
+  playerId: number;
+  playerName: string;
+  turnNumber: number;
+  actionType: string;
+  details: string;
+}
+
 export interface GameState {
   gridWidth: number;
   gridHeight: number;
@@ -169,6 +178,7 @@ export interface GameState {
   turnNumber: number;
   activePlayerIdx: number;
   combatLog: GameEvent[];
+  actionLog?: ActionLogEntry[];
   rules?: GameRules;
   turnStyle?: 'simultaneous' | 'sequential';
 }
@@ -607,6 +617,7 @@ export function dispatchFleet(
   };
 
   gameState.fleets.push(newFleet);
+  logAction(gameState, playerId, 'dispatch_fleet', `Dispatched fleet with ships ${Object.entries(shipQuantities).filter(([_, q]) => q > 0).map(([t, q]) => `${t}:${q}`).join(', ')} from ${source.name} to ${dest.name}`);
   return { success: true, fleet: newFleet };
 }
 
@@ -631,6 +642,7 @@ export function recallFleet(
   fleet.turnsRemaining = Math.max(1, turnsTraveled);
   fleet.totalTurns = fleet.turnsRemaining;
 
+  logAction(gameState, playerId, 'recall_fleet', `Recalled fleet returning to base ${fleet.destination.name}`);
   return { success: true };
 }
 
@@ -665,6 +677,7 @@ export function upgradeSystem(
       player.resources -= cost;
     }
     player.tech.Hyperdrive += 1;
+    logAction(gameState, playerId, 'upgrade_system', `Upgraded global Hyperdrive technology to level ${player.tech.Hyperdrive}`);
     return { success: true };
   }
 
@@ -701,6 +714,7 @@ export function upgradeSystem(
   }
   sys[prop] += 1;
 
+  logAction(gameState, playerId, 'upgrade_system', `Upgraded ${upgradeType} to level ${sys[prop]} at ${sys.name}`);
   return { success: true };
 }
 
@@ -749,6 +763,7 @@ export function queueShipProduction(
     totalTurns: buildTime
   });
 
+  logAction(gameState, playerId, 'queue_production', `Queued ${shipType} production at ${sys.name}`);
   return { success: true };
 }
 
@@ -1038,6 +1053,7 @@ export function processTurnEnd(gameState: GameState): void {
   });
 
   gameState.combatLog = [...newCombatLogs, ...gameState.combatLog].slice(0, 30);
+  logAction(gameState, 0, 'process_turn_end', `Advanced to turn ${gameState.turnNumber + 1}`);
   gameState.turnNumber += 1;
 }
 
@@ -1063,6 +1079,7 @@ export function cancelDispatch(
   }
   
   gameState.fleets.splice(fleetIndex, 1);
+  logAction(gameState, playerId, 'cancel_dispatch', `Cancelled fleet dispatch to ${fleet.destination.name}`);
   return { success: true };
 }
 
@@ -1087,6 +1104,36 @@ export function cancelProduction(
   }
   
   sys.buildQueue.splice(jobIndex, 1);
+  logAction(gameState, playerId, 'cancel_production', `Cancelled ${job.shipType} production at ${sys.name}`);
   return { success: true };
+}
+
+export function logAction(
+  gameState: GameState,
+  playerId: number,
+  actionType: string,
+  details: string
+): void {
+  if (!gameState.actionLog) {
+    gameState.actionLog = [];
+  }
+  let playerName = 'System';
+  if (playerId > 0) {
+    const player = gameState.players.find(p => p.id === playerId) || gameState.playerState[playerId];
+    playerName = player ? player.name : `Player ${playerId}`;
+  }
+  
+  gameState.actionLog.push({
+    timestamp: new Date().toISOString(),
+    playerId,
+    playerName,
+    turnNumber: gameState.turnNumber,
+    actionType,
+    details
+  });
+  
+  if (gameState.actionLog.length > 100) {
+    gameState.actionLog = gameState.actionLog.slice(-100);
+  }
 }
 

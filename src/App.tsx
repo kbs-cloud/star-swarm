@@ -14,7 +14,8 @@ import {
   Player,
   GameRules,
   NORMAL_RULES,
-  SIMPLE_RULES
+  SIMPLE_RULES,
+  logAction
 } from './game/gameState';
 import { runAITurn } from './game/ai';
 import { StarMap } from './components/StarMap';
@@ -401,6 +402,7 @@ export default function App() {
     const player = stateCopy.players.find(p => p.id === playerId);
     if (player) {
       player.endedTurn = false;
+      logAction(stateCopy, playerId, 'cancel_end_turn', 'Resumed orders (cancelled end turn)');
       stateCopy.activePlayerIdx = stateCopy.players.indexOf(player);
       setGameState(stateCopy);
       syncGameState(stateCopy);
@@ -416,6 +418,7 @@ export default function App() {
       const player = stateCopy.players.find(p => p.id === playerId);
       if (player) {
         player.endedTurn = false;
+        logAction(stateCopy, playerId, 'cancel_end_turn', 'Resumed orders (cancelled end turn)');
         stateCopy.activePlayerIdx = stateCopy.players.indexOf(player);
         const updateRes = await updateGame(gameId, stateCopy);
         if (updateRes.success) {
@@ -1384,6 +1387,7 @@ export default function App() {
 
     if (playerToEnd) {
       playerToEnd.endedTurn = true;
+      logAction(stateCopy, playerToEnd.id, 'end_turn', 'Submitted orders / ended turn');
     }
 
     if (stateCopy.turnStyle === 'sequential') {
