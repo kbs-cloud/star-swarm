@@ -396,9 +396,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           {/* MY FACTION IDENTITY — always shows who THIS logged-in user is */}
           {(() => {
-            // First try exact email match, then fall back to isLocal flag for host
-            const myPlayer = gameState.players.find(p => p.assignedEmail === currentUserEmail)
-              || (gameOwnerEmail === currentUserEmail ? gameState.players.find(p => p.isLocal) : undefined);
+            // Check if active player is local first (e.g. local hotseat/sequential turn), then try email match, then fall back to host's local flag
+            const myPlayer = (activePlayerSlot && isPlayerLocalToClient(activePlayerSlot))
+              ? activePlayerSlot
+              : (gameState.players.find(p => p.assignedEmail === currentUserEmail)
+                 || (gameOwnerEmail === currentUserEmail ? gameState.players.find(p => p.isLocal) : undefined));
             const myState = myPlayer ? gameState.playerState[myPlayer.id] : null;
             const dotColor = myPlayer?.color || myState?.color || '#888';
             return (
@@ -1629,7 +1631,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* Cancel Turn End Button */}
             {(() => {
-              const myPlayer = gameState.players.find(p => p.assignedEmail === currentUserEmail || (p.id === 1 && isPlayerLocalToClient(p)));
+              const myPlayer = (activePlayerSlot && isPlayerLocalToClient(activePlayerSlot))
+                ? activePlayerSlot
+                : (gameState.players.find(p => p.assignedEmail === currentUserEmail)
+                   || (gameOwnerEmail === currentUserEmail ? gameState.players.find(p => p.isLocal) : undefined));
               const activeHumans = gameState.players.filter(p => p.type === 'human' && !gameState.playerState[p.id]?.lost);
               const othersPending = activeHumans.some(p => p.id !== myPlayer?.id && !p.endedTurn);
               if (myPlayer && myPlayer.endedTurn && othersPending && onCancelEndTurn && gameState.turnStyle !== 'sequential') {
