@@ -187,6 +187,13 @@ export default function App() {
     setTimeout(() => setToastMsg(null), durationMs);
   };
 
+  // Guest Name State
+  const [guestName, setGuestName] = useState<string>(() => localStorage.getItem('starswarm_guest_name') || '');
+  const updateGuestName = (val: string) => {
+    setGuestName(val);
+    localStorage.setItem('starswarm_guest_name', val);
+  };
+
   // Join request state (for players waiting to join a game)
   const [pendingJoinGameId, setPendingJoinGameId] = useState<string | null>(null);
   const [myJoinStatus, setMyJoinStatus] = useState<'pending' | 'accepted' | 'rejected' | null>(null);
@@ -255,13 +262,14 @@ export default function App() {
 
   // Helper to determine if a player is local to this client session
   const isPlayerLocalToClient = (player: PlayerSetup | Player): boolean => {
-    if (!currentUser) return false;
-    // If the player is assigned to the current user's email, they are local.
-    if (player.assignedEmail === currentUser.email) {
+    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
+    if (userEmail && player.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase()) {
       return true;
     }
-    // If it's marked as local in the game state, AND the current user is the game owner, they are local (for hotseat play).
-    if (player.isLocal && gameOwnerEmail === currentUser.email) {
+    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+    const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+    const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
+    if (player.isLocal && isOwner) {
       return true;
     }
     return false;
@@ -276,19 +284,21 @@ export default function App() {
     setIsLoadingGame(false);
     if (res.success && res.game) {
       const gameData = res.game;
-      const userEmail = effectiveUser?.email;
-      const isOwner = gameData.ownerEmail === userEmail;
+      const userEmail = effectiveUser?.email || localStorage.getItem('starswarm_guest_name') || null;
+      const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+      const isLocalOwner = ownedGames.includes(gameData.id);
+      const isOwner = gameData.ownerEmail ? (gameData.ownerEmail === userEmail) : isLocalOwner;
       const hasSlot = gameData.gameState.players.some(
-        p => p.assignedEmail === userEmail || (p.isLocal && isOwner)
+        p => (userEmail && userEmail.trim().length > 0 && p.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase()) || (p.isLocal && isOwner)
       );
 
       // If user has no slot and is not the host, show the join request flow
-      if (!isOwner && !hasSlot && userEmail) {
+      if (!isOwner && !hasSlot) {
         setActiveGameId(gameData.id);
         setPendingJoinGameId(gameData.id);
         window.history.pushState(null, '', `?gameId=${gameData.inviteCode || gameData.id}`);
         // Check if there's already a pending request for this user
-        const statusRes = await checkMyJoinStatus(gameData.id);
+        const statusRes = await checkMyJoinStatus(gameData.id, userEmail || undefined);
         setMyJoinStatus(statusRes.success ? (statusRes.status ?? null) : null);
         return;
       }
@@ -511,13 +521,8 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const urlGameId = params.get('gameId');
       if (urlGameId) {
-        if (user) {
-          // Pass user directly — React state (currentUser) isn't committed yet at this point
-          loadGameFromId(urlGameId, user);
-        } else {
-          setIsAuthModalOpen(true);
-          showError('Command Link required to access this simulation. Please sign in.');
-        }
+        // Pass user directly (which might be null)
+        loadGameFromId(urlGameId, user);
       }
     };
     bootstrap();
@@ -595,8 +600,12 @@ export default function App() {
 
   // When on the game screen, if we are the host, poll for pending join requests every 5 s
   React.useEffect(() => {
-    if (!activeGameId || screen !== 'game' || !currentUser || !gameOwnerEmail) return;
-    if (gameOwnerEmail !== currentUser.email) return;
+    const userEmail = currentUser?.email || guestName;
+    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+    const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+    const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
+
+    if (!activeGameId || screen !== 'game' || !isOwner) return;
 
     let isSubscribed = true;
     const pollJoins = async () => {
@@ -616,7 +625,7 @@ export default function App() {
     const interval = setInterval(pollJoins, 5000);
     return () => { isSubscribed = false; clearInterval(interval); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGameId, screen, currentUser, gameOwnerEmail]);
+  }, [activeGameId, screen, currentUser, gameOwnerEmail, guestName]);
 
   // Poll home screen pending join requests for each owned saved game every 8 s
   React.useEffect(() => {
@@ -649,11 +658,12 @@ export default function App() {
 
   // If the player has a pending join request, poll their status every 3 s
   React.useEffect(() => {
-    if (!pendingJoinGameId || !currentUser) return;
+    const userEmail = currentUser?.email || guestName;
+    if (!pendingJoinGameId || !userEmail) return;
     let isSubscribed = true;
 
     const pollStatus = async () => {
-      const res = await checkMyJoinStatus(pendingJoinGameId);
+      const res = await checkMyJoinStatus(pendingJoinGameId, userEmail);
       if (!isSubscribed) return;
       if (res.success) {
         if (res.status === 'accepted') {
@@ -674,7 +684,7 @@ export default function App() {
     const interval = setInterval(pollStatus, 3000);
     return () => { isSubscribed = false; clearInterval(interval); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingJoinGameId, currentUser]);
+  }, [pendingJoinGameId, currentUser, guestName]);
 
 
   // Recommendations mapping
@@ -951,19 +961,15 @@ export default function App() {
 
   // Start new game
   const handleStartGame = async () => {
-    if (!currentUser) {
-      setIsAuthModalOpen(true);
-      showError('Command Link required to initialize new galaxy simulations. Please establish link.');
-      return;
-    }
     if (systemCount < playersSetup.length) {
       showError(`Insufficient clusters! Must have at least ${playersSetup.length} systems for this faction count.`);
       return;
     }
 
+    const guestNameVal = localStorage.getItem('starswarm_guest_name') || '';
     const updatedSetup = [...playersSetup];
     if (updatedSetup[0]) {
-      updatedSetup[0].assignedEmail = currentUser.email;
+      updatedSetup[0].assignedEmail = currentUser ? currentUser.email : guestNameVal;
       updatedSetup[0].isLocal = true;
     }
 
@@ -981,7 +987,12 @@ export default function App() {
     const res = await createGame(gameName, initialized);
     if (res.success && res.gameId) {
       setActiveGameId(res.gameId);
-      setGameOwnerEmail(currentUser.email);
+      setGameOwnerEmail(currentUser ? currentUser.email : null);
+      if (!currentUser) {
+        const owned = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+        owned.push(res.gameId);
+        localStorage.setItem('starswarm_owned_games', JSON.stringify(owned));
+      }
       window.history.pushState(null, '', `?gameId=${res.inviteCode || res.gameId}`);
       setGameState(initialized);
       setSelectedSystemId(null);
@@ -1446,11 +1457,13 @@ export default function App() {
 
   // Faction control operations
   const handleClaimFaction = (playerId: number) => {
-    if (!gameState || !currentUser) return;
+    if (!gameState) return;
+    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name') || null;
+    if (!userEmail) return;
     const stateCopy = { ...gameState };
     const player = stateCopy.players.find(p => p.id === playerId);
     if (player && player.type === 'human') {
-      player.assignedEmail = currentUser.email;
+      player.assignedEmail = userEmail;
       player.isLocal = true;
       setGameState(stateCopy);
       syncGameState(stateCopy);
@@ -1458,12 +1471,16 @@ export default function App() {
   };
 
   const handleTogglePlayerLocal = (playerId: number) => {
-    if (!gameState || !currentUser) return;
+    if (!gameState) return;
+    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name') || null;
+    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+    const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+    const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
+
     const stateCopy = { ...gameState };
     const player = stateCopy.players.find(p => p.id === playerId);
     if (player && player.type === 'human') {
-      const isOwner = gameOwnerEmail === currentUser.email;
-      const isMe = player.assignedEmail === currentUser.email;
+      const isMe = userEmail && player.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase();
       if (isOwner || isMe) {
         player.isLocal = !player.isLocal;
         setGameState(stateCopy);
@@ -1473,11 +1490,16 @@ export default function App() {
   };
 
   const handleAssignPlayerEmail = (playerId: number, email: string) => {
-    if (!gameState || !currentUser) return;
+    if (!gameState) return;
+    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name') || null;
+    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+    const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+    const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
+
     const stateCopy = { ...gameState };
     const player = stateCopy.players.find(p => p.id === playerId);
     if (player && player.type === 'human') {
-      if (gameOwnerEmail === currentUser.email) {
+      if (isOwner) {
         player.assignedEmail = email.trim() || null;
         setGameState(stateCopy);
         syncGameState(stateCopy);
@@ -1637,13 +1659,43 @@ export default function App() {
               </div>
             )}
 
+            {!currentUser && myJoinStatus !== 'pending' && myJoinStatus !== 'rejected' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'left', width: '100%', marginBottom: '15px' }}>
+                <label style={{ fontSize: '11px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron' }}>ENTER DISPLAY NAME TO JOIN:</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Admiral Alice"
+                  value={guestName}
+                  onChange={(e) => updateGuestName(e.target.value)}
+                  className="input-sci-fi"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    border: '1px solid rgba(0, 240, 255, 0.3)',
+                    borderRadius: '4px',
+                    padding: '8px 12px',
+                    color: 'white',
+                    fontSize: '13px',
+                    fontFamily: 'Share Tech Mono',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
+
             {myJoinStatus !== 'pending' && myJoinStatus !== 'rejected' && (
               <button
                 className="btn-sci-fi pulse-light"
                 style={{ justifyContent: 'center', fontSize: '13px' }}
                 onClick={async () => {
                   if (!pendingJoinGameId) return;
-                  const res = await requestToJoin(pendingJoinGameId);
+                  if (!currentUser && (!guestName || guestName.trim().length === 0)) {
+                    showError('Please enter a display name.');
+                    return;
+                  }
+                  const emailParam = currentUser ? undefined : guestName;
+                  const res = await requestToJoin(pendingJoinGameId, emailParam);
                   if (res.success) {
                     setMyJoinStatus('pending');
                     showToast('📡 Join request sent! Waiting for host approval…', 'info');
@@ -2677,8 +2729,15 @@ export default function App() {
             onCenterOnCoords={(x, y) => setCenterOnCoords({ x, y, trigger: Date.now() })}
             targetSystem={targetSystem}
             setTargetSystem={setTargetSystem}
-            currentUserEmail={currentUser?.email || ""}
-            gameOwnerEmail={gameOwnerEmail || ""}
+            currentUserEmail={currentUser?.email || localStorage.getItem('starswarm_guest_name') || ""}
+            gameOwnerEmail={(() => {
+              const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
+              const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+              const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+              if (gameOwnerEmail) return gameOwnerEmail;
+              if (isLocalOwner && userEmail) return userEmail;
+              return "";
+            })()}
             connectedPlayers={connectedPlayers}
             isPlayerLocalToClient={isPlayerLocalToClient}
             onClaimFaction={handleClaimFaction}
@@ -2687,7 +2746,13 @@ export default function App() {
           />
 
           {/* IN-GAME JOIN REQUEST PANEL (host only) */}
-          {gameOwnerEmail === currentUser?.email && activeGameId && (homePendingRequests[activeGameId] || []).length > 0 && (() => {
+          {(() => {
+            const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
+            const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+            const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+            const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
+            return isOwner;
+          })() && activeGameId && (homePendingRequests[activeGameId] || []).length > 0 && (() => {
             const reqs = homePendingRequests[activeGameId] || [];
             const isPanelOpen = joinPanelGameId === activeGameId;
             const freeSlots = gameState.players.filter(p => p.type === 'human' && !p.assignedEmail).map(p => ({ id: p.id, name: p.name }));

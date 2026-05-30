@@ -4,10 +4,16 @@ import { getCookie } from './auth';
 
 function getHeaders(): Record<string, string> {
   const csrfToken = getCookie('csrf_token') || '';
-  return {
+  const guestName = localStorage.getItem('starswarm_guest_name') || '';
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-CSRF-Token': csrfToken
   };
+  if (guestName) {
+    headers['X-Guest-Name'] = guestName;
+    headers['X-Guest-Email'] = guestName;
+  }
+  return headers;
 }
 
 export interface GameMetadata {
@@ -219,11 +225,12 @@ export interface JoinRequest {
  * Player submits a request to join a game they don't own.
  * One pending request per player per game is enforced server-side.
  */
-export async function requestToJoin(gameId: string): Promise<{ success: boolean; joinId?: number; token?: string; error?: string }> {
+export async function requestToJoin(gameId: string, email?: string): Promise<{ success: boolean; joinId?: number; token?: string; error?: string }> {
   try {
     const response = await fetch(`/api/games/${gameId}/join`, {
       method: 'POST',
-      headers: getHeaders()
+      headers: getHeaders(),
+      body: email ? JSON.stringify({ email }) : undefined
     });
     const data = await response.json();
     if (response.ok && data.success) {
@@ -256,9 +263,13 @@ export async function fetchPendingJoins(gameId: string): Promise<{ success: bool
 /**
  * Player polls this to find out if their join request was accepted or rejected.
  */
-export async function checkMyJoinStatus(gameId: string): Promise<{ success: boolean; status?: 'pending' | 'accepted' | 'rejected' | null; joinId?: number; error?: string }> {
+export async function checkMyJoinStatus(gameId: string, email?: string): Promise<{ success: boolean; status?: 'pending' | 'accepted' | 'rejected' | null; joinId?: number; error?: string }> {
   try {
-    const response = await fetch(`/api/games/${gameId}/my-join-status`, {
+    let url = `/api/games/${gameId}/my-join-status`;
+    if (email) {
+      url += `?email=${encodeURIComponent(email)}`;
+    }
+    const response = await fetch(url, {
       headers: getHeaders()
     });
     const data = await response.json();

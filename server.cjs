@@ -669,9 +669,6 @@ app.get('/api/games', (req, res) => {
 // Endpoint: Create a new game entry in DB
 app.post('/api/games', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
     const { name, game_state } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: 'Invalid game name.' });
@@ -688,9 +685,10 @@ app.post('/api/games', validateCSRF, (req, res) => {
         return res.status(500).json({ error: 'Failed to generate invite code.' });
       }
       
+      const ownerEmail = user ? user.email : null;
       db.run(
         'INSERT INTO games (id, invite_code, owner_email, name, game_state) VALUES (?, ?, ?, ?, ?)',
-        [gameId, inviteCode, user.email, name.trim(), gameStateStr],
+        [gameId, inviteCode, ownerEmail, name.trim(), gameStateStr],
         function (insertErr) {
           if (insertErr) {
             console.error('Error creating game:', insertErr.message);
@@ -712,9 +710,6 @@ app.post('/api/games', validateCSRF, (req, res) => {
 // Endpoint: Fetch a specific game state by ID
 app.get('/api/games/:id', (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
     const gameId = req.params.id;
     db.get(
       'SELECT id, invite_code, owner_email, name, game_state, created_at, updated_at FROM games WHERE id = ?',
@@ -735,7 +730,10 @@ app.get('/api/games/:id', (req, res) => {
           return res.status(500).json({ error: 'Game state corruption detected.' });
         }
         
-        updatePresence(gameId, user.email);
+        const presenceEmail = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
+        if (presenceEmail) {
+          updatePresence(gameId, presenceEmail);
+        }
         const connected = getPresence(gameId);
 
         res.status(200).json({
@@ -760,9 +758,6 @@ app.get('/api/games/:id', (req, res) => {
 // Endpoint: Update an existing game state by ID
 app.put('/api/games/:id', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
     const gameId = req.params.id;
     const { game_state } = req.body;
     if (!game_state) {
@@ -770,15 +765,15 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
     }
     const gameStateStr = typeof game_state === 'string' ? game_state : JSON.stringify(game_state);
     
-    db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
-      if (findErr) {
-        return res.status(500).json({ error: 'Database validation error.' });
-      }
-      if (!row) {
-        return res.status(404).json({ error: 'Game not found.' });
-      }
-      
-      const now = new Date().toISOString();
+      db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
+        if (findErr) {
+          return res.status(500).json({ error: 'Database validation error.' });
+        }
+        if (!row) {
+          return res.status(404).json({ error: 'Game not found.' });
+        }
+        
+        const now = new Date().toISOString();
       db.run(
         'UPDATE games SET game_state = ?, updated_at = ? WHERE id = ?',
         [gameStateStr, now, gameId],
@@ -787,7 +782,10 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
             console.error('Error updating game:', updateErr.message);
             return res.status(500).json({ error: 'Failed to update game state.' });
           }
-          updatePresence(gameId, user.email);
+          const presenceEmail = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
+          if (presenceEmail) {
+            updatePresence(gameId, presenceEmail);
+          }
           res.status(200).json({
             success: true,
             connectedPlayers: getPresence(gameId),
@@ -802,11 +800,11 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
 // Endpoint: Heartbeat/Presence update
 app.post('/api/games/:id/presence', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized.' });
-    }
     const gameId = req.params.id;
-    updatePresence(gameId, user.email);
+    const presenceEmail = user ? user.email : (req.headers['x-guest-email'] || req.headers['x-guest-name']);
+    if (presenceEmail) {
+      updatePresence(gameId, presenceEmail);
+    }
     res.status(200).json({
       success: true,
       connectedPlayers: getPresence(gameId)
@@ -817,9 +815,6 @@ app.post('/api/games/:id/presence', validateCSRF, (req, res) => {
 // Endpoint: Delete (decommission) a specific game simulation
 app.delete('/api/games/:id', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
     const gameId = req.params.id;
     
     db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, row) => {
@@ -829,7 +824,7 @@ app.delete('/api/games/:id', validateCSRF, (req, res) => {
       if (!row) {
         return res.status(404).json({ error: 'Game not found.' });
       }
-      if (row.owner_email !== user.email) {
+      if (row.owner_email && (!user || row.owner_email !== user.email)) {
         return res.status(403).json({ error: 'Forbidden. Only the creator can decommission this simulation.' });
       }
       
@@ -856,14 +851,18 @@ app.delete('/api/games/:id', validateCSRF, (req, res) => {
  */
 app.post('/api/games/:gameId/join', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
     const { gameId } = req.params;
+    const email = user ? user.email : (req.body.email || req.headers['x-guest-email'] || req.headers['x-guest-name']);
+    if (!email || typeof email !== 'string' || email.trim().length === 0) {
+      return res.status(400).json({ error: 'Display name is required to join.' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
 
     // Verify the game exists
     db.get('SELECT id, owner_email FROM games WHERE id = ?', [gameId], (findErr, game) => {
       if (findErr) return res.status(500).json({ error: 'Database error.' });
       if (!game) return res.status(404).json({ error: 'Game not found.' });
-      if (game.owner_email === user.email) {
+      if (game.owner_email && game.owner_email === normalizedEmail) {
         return res.status(400).json({ error: 'You are the host of this game.' });
       }
 
@@ -871,7 +870,7 @@ app.post('/api/games/:gameId/join', validateCSRF, (req, res) => {
       db.run(
         `INSERT OR REPLACE INTO join_requests (game_id, email, status)
          VALUES (?, ?, 'pending')`,
-        [gameId, user.email],
+        [gameId, normalizedEmail],
         function (insertErr) {
           if (insertErr) {
             console.error('join_requests insert error:', insertErr.message);
@@ -892,13 +891,12 @@ app.post('/api/games/:gameId/join', validateCSRF, (req, res) => {
  */
 app.get('/api/games/:gameId/join-requests', (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
     const { gameId } = req.params;
 
     db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, game) => {
       if (findErr) return res.status(500).json({ error: 'Database error.' });
       if (!game) return res.status(404).json({ error: 'Game not found.' });
-      if (game.owner_email !== user.email) {
+      if (game.owner_email && (!user || game.owner_email !== user.email)) {
         return res.status(403).json({ error: 'Only the game host can view join requests.' });
       }
 
@@ -922,12 +920,16 @@ app.get('/api/games/:gameId/join-requests', (req, res) => {
  */
 app.get('/api/games/:gameId/my-join-status', (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
     const { gameId } = req.params;
+    const email = user ? user.email : (req.query.email || req.headers['x-guest-email'] || req.headers['x-guest-name']);
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required to check status.' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
 
     db.get(
       `SELECT id, status FROM join_requests WHERE game_id = ? AND email = ?`,
-      [gameId, user.email],
+      [gameId, normalizedEmail],
       (queryErr, row) => {
         if (queryErr) return res.status(500).json({ error: 'Database error.' });
         if (!row) return res.status(200).json({ success: true, status: null });
@@ -944,7 +946,6 @@ app.get('/api/games/:gameId/my-join-status', (req, res) => {
  */
 app.post('/api/games/:gameId/assign-slot', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
     const { gameId } = req.params;
     const { joinRequestId, playerId, email } = req.body;
 
@@ -955,7 +956,7 @@ app.post('/api/games/:gameId/assign-slot', validateCSRF, (req, res) => {
     db.get('SELECT owner_email, game_state FROM games WHERE id = ?', [gameId], (findErr, game) => {
       if (findErr) return res.status(500).json({ error: 'Database error.' });
       if (!game) return res.status(404).json({ error: 'Game not found.' });
-      if (game.owner_email !== user.email) {
+      if (game.owner_email && (!user || game.owner_email !== user.email)) {
         return res.status(403).json({ error: 'Only the game host can assign slots.' });
       }
 
@@ -1026,7 +1027,6 @@ app.post('/api/games/:gameId/assign-slot', validateCSRF, (req, res) => {
  */
 app.post('/api/games/:gameId/reject-join', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
-    if (err || !user) return res.status(401).json({ error: 'Unauthorized.' });
     const { gameId } = req.params;
     const { joinRequestId } = req.body;
 
@@ -1035,7 +1035,7 @@ app.post('/api/games/:gameId/reject-join', validateCSRF, (req, res) => {
     db.get('SELECT owner_email FROM games WHERE id = ?', [gameId], (findErr, game) => {
       if (findErr) return res.status(500).json({ error: 'Database error.' });
       if (!game) return res.status(404).json({ error: 'Game not found.' });
-      if (game.owner_email !== user.email) {
+      if (game.owner_email && (!user || game.owner_email !== user.email)) {
         return res.status(403).json({ error: 'Only the game host can reject join requests.' });
       }
 

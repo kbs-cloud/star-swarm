@@ -584,4 +584,76 @@ test.describe('Star-Swarm E2E Tests', () => {
     await contextA.close();
     await contextB.close();
   });
+
+  test('should support guest game creation and joining with display name only', async ({ browser }) => {
+    // 1. Host (unauthenticated) creates a game
+    const contextA = await browser.newContext();
+    const pageA = await contextA.newPage();
+
+    // Navigate to homepage without logging in
+    await pageA.goto('http://localhost:8080/');
+
+    // Open skirmish match lobby
+    await pageA.locator('button:has-text("SKIRMISH MATCH")').click();
+
+    // Verify we are in the lobby
+    await expect(pageA.locator('h2:has-text("TACTICAL SETUP LOBBY")')).toBeVisible();
+
+    // Change Player 2 to human remote (not local, we leave assignedEmail blank in the lobby)
+    const row2 = pageA.locator('div:has(h3:has-text("FACTIONS & TEAM MAPPING")) + div > div').nth(1);
+    await row2.locator('select').first().selectOption('human');
+    await row2.locator('input[type="checkbox"]').uncheck();
+
+    // Launch the game (guest games are created with owner_email = NULL)
+    const createResponsePromise = pageA.waitForResponse(response =>
+      response.url().includes('/api/games') && response.request().method() === 'POST'
+    );
+    await pageA.locator('button:has-text("LAUNCH GALAXY SIMULATION")').click();
+    await expect(pageA.locator('canvas')).toBeVisible();
+
+    const createResponse = await createResponsePromise;
+    const createData = await createResponse.json();
+    const uuid = createData.gameId;
+    const shortCode = createData.inviteCode;
+    expect(uuid).toHaveLength(36);
+    expect(shortCode).toHaveLength(8);
+
+    // 2. Guest B (unauthenticated) joins the game with display name only
+    const contextB = await browser.newContext();
+    const pageB = await contextB.newPage();
+
+    // Navigate using the shortened invite link
+    await pageB.goto(`http://localhost:8080/?gameId=${shortCode}`);
+
+    // Since Guest B is not logged in and not assigned yet, they should see the waiting overlay
+    // displaying the text "ENTER DISPLAY NAME TO JOIN:"
+    await expect(pageB.locator('text=ENTER DISPLAY NAME TO JOIN:')).toBeVisible();
+
+    // Enter a display name instead of an email (does not contain "@")
+    await pageB.locator('input[placeholder="e.g. Admiral Alice"]').fill('GuestCommanderB');
+
+    // Click request to join
+    await pageB.locator('button:has-text("REQUEST TO JOIN SIMULATION")').click();
+
+    // Expect the status to change to pending
+    await expect(pageB.locator('text=POLLING HOST RESPONSE')).toBeVisible();
+
+    // 3. Host sees the join request and accepts it
+    // Wait for the join request to appear on Host's screen (polling every 5 seconds)
+    const joinRequestBtn = pageA.locator('text=1 JOIN REQUEST');
+    await expect(joinRequestBtn).toBeVisible({ timeout: 15000 });
+    await joinRequestBtn.click();
+
+    // Verify Guest B's name is shown in the join request list (normalized to lower case in DB)
+    await expect(pageA.locator('text=guestcommanderb')).toBeVisible();
+
+    // Click ACCEPT button
+    await pageA.locator('button:has-text("ACCEPT")').click();
+
+    // Guest B's polling loop should pick it up and load the game successfully!
+    await expect(pageB.locator('canvas')).toBeVisible({ timeout: 15000 });
+
+    await contextA.close();
+    await contextB.close();
+  });
 });

@@ -10,6 +10,7 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
 - **Custom Game Modes & Rulesets**: Design custom galaxy rulesets (toggling credits, upgrades, neutral starship ranges, automated production) or choose Simple Mode for direct node production with custom ship definition attributes.
 - **Database Game Persistence**: Matches are saved directly to the database. Resume your active games at any time, with turns, fleets, and ship queues fully preserved.
 - **URL-Based Resuming & Sharing**: Every match has a dedicated URL query param (`?gameId=UUID` or shortened invite code), enabling you to bookmark your sessions or share the link to load the same game elsewhere.
+- **Guest Play & Remote Invites**: Launch galaxy simulations or request entry to active games as an unauthenticated guest. Play instantly using only a display name (no registration or email required), with identity and presence managed securely via local storage and custom HTTP headers.
 - **Persistent User Accounts**: Secure server-side registration and authentication via SQLite database storage and password hashing.
 - **Integrated Google Sign-in**: Simulated OAuth account selector that links Gmail accounts automatically and tracks career victory telemetry.
 - **Secrecy Gate for Hotseat Multiplayer**: Screen lockdown and secrecy gates that hide sensor layouts and system statistics between turns to prevent screen-peeping during hotseat matches.

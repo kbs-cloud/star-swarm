@@ -31,10 +31,16 @@ export function getCookie(name: string): string | null {
  */
 function getHeaders(): Record<string, string> {
   const csrfToken = getCookie('csrf_token') || '';
-  return {
+  const guestName = localStorage.getItem('starswarm_guest_name') || '';
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-CSRF-Token': csrfToken
   };
+  if (guestName) {
+    headers['X-Guest-Name'] = guestName;
+    headers['X-Guest-Email'] = guestName;
+  }
+  return headers;
 }
 
 /**
