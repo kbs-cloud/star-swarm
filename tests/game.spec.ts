@@ -656,4 +656,111 @@ test.describe('Star-Swarm E2E Tests', () => {
     await contextA.close();
     await contextB.close();
   });
+
+  test('should select and center on home planet at turn start if an unowned planet is selected', async ({ page }) => {
+    const randomEmail = `turnstart-commander-${Date.now()}@example.com`;
+
+    // 1. Navigate to the local server
+    await page.goto('http://localhost:8080/');
+
+    // 2. Register & Login
+    const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
+    await establishLinkBtn.click();
+    const registerTab = page.locator('button:has-text("REGISTER")');
+    await registerTab.click();
+    await page.locator('input[type="email"]').fill(randomEmail);
+    await page.locator('input[type="password"]').fill('password123');
+    await page.locator('button[type="submit"]').click();
+    await expect(page.locator('text=Account created successfully')).toBeVisible();
+
+    await page.locator('input[type="email"]').fill(randomEmail);
+    await page.locator('input[type="password"]').fill('password123');
+    await page.locator('button[type="submit"]').click();
+    await expect(page.locator('button:has-text("LOG OUT")')).toBeVisible();
+
+    // 3. Click AI Skirmish Match and Launch
+    const skirmishBtn = page.locator('button:has-text("SKIRMISH MATCH")');
+    await skirmishBtn.click();
+
+    const startBtn = page.locator('button:has-text("LAUNCH GALAXY SIMULATION")');
+    await expect(startBtn).toBeVisible();
+
+    // Intercept/wait for POST response to get game ID
+    const createResponsePromise = page.waitForResponse(response =>
+      response.url().includes('/api/games') && response.request().method() === 'POST'
+    );
+    await startBtn.click();
+    const createResponse = await createResponsePromise;
+    const createData = await createResponse.json();
+    const gameId = createData.gameId;
+
+    // Fetch the actual initialized game state from the backend API
+    const getResponse = await page.request.get(`http://localhost:8080/api/games/${gameId}`);
+    const getData = await getResponse.json();
+    const gameState = getData.game.gameState;
+
+    // Find home planet and an unowned planet
+    const homePlanet = gameState.systems.find((s: any) => s.owner === 1 && s.isHomePlanet);
+    const unownedPlanet = gameState.systems.find((s: any) => s.owner !== 1);
+
+    expect(homePlanet).toBeDefined();
+    expect(unownedPlanet).toBeDefined();
+
+    // Wait for starmap canvas
+    const canvas = page.locator('canvas');
+    await expect(canvas).toBeVisible();
+    await page.waitForTimeout(1000);
+
+    // 4. Click the unowned planet on the canvas
+    await page.evaluate(({ homeX, homeY, targetX, targetY }) => {
+      const canvasEl = document.querySelector('canvas');
+      if (!canvasEl) throw new Error('Canvas not found');
+      const rect = canvasEl.getBoundingClientRect();
+      const width = canvasEl.width;
+      const height = canvasEl.height;
+      
+      const zoom = 1;
+      const cellSize = 20;
+      const panX = (width / 2) - (homeX * cellSize * zoom);
+      const panY = (height / 2) - (homeY * cellSize * zoom);
+      
+      const mouseX = targetX * cellSize * zoom + panX;
+      const mouseY = targetY * cellSize * zoom + panY;
+      const clientX = rect.left + mouseX;
+      const clientY = rect.top + mouseY;
+      
+      const clickEvent = new MouseEvent('click', {
+        clientX: clientX,
+        clientY: clientY,
+        bubbles: true,
+        cancelable: true
+      });
+      canvasEl.dispatchEvent(clickEvent);
+    }, {
+      homeX: homePlanet.x,
+      homeY: homePlanet.y,
+      targetX: unownedPlanet.x,
+      targetY: unownedPlanet.y
+    });
+
+    // 5. Verify the unowned planet is selected (its name should be visible in the inspector header)
+    const unownedPlanetHeading = page.locator(`h2:has-text("${unownedPlanet.name}")`);
+    await expect(unownedPlanetHeading).toBeVisible();
+
+    // 6. Click End Turn
+    const endTurnBtn = page.locator('button:has-text("END TURN")');
+    await expect(endTurnBtn).toBeVisible();
+    await endTurnBtn.click();
+
+    // Let the AI run its turn calculations and update state
+    await page.waitForTimeout(1500);
+
+    // Verify turn progresses to #2
+    const nextTurnIndicator = page.locator('.telemetry:has-text("#2")');
+    await expect(nextTurnIndicator).toBeVisible();
+
+    // 7. Verify the selection has automatically switched to the home planet
+    const homePlanetHeading = page.locator(`h2:has-text("${homePlanet.name}")`);
+    await expect(homePlanetHeading).toBeVisible();
+  });
 });

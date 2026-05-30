@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  initializeGame,
   GameState,
   StarSystem,
   FACTION_INFO,
@@ -152,7 +151,8 @@ export default function App() {
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [activeGameName, setActiveGameName] = useState<string>('');
   const [savedGames, setSavedGames] = useState<GameMetadata[]>([]);
-  const [_, setIsLoadingGame] = useState(false);
+  const [isLoadingGame, setIsLoadingGame] = useState(false);
+  const isCancelledRef = React.useRef(false);
   const [gameToDelete, setGameToDelete] = useState<GameMetadata | null>(null);
 
   // Connected Players & Game Owner Email
@@ -281,6 +281,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
   const prevGameStateRef = React.useRef<GameState | null>(null);
   const prevGameIdRef = React.useRef<string | null>(null);
+  const lastTurnKeyRef = React.useRef<string | null>(null);
+  const lastLoadedGameIdRef = React.useRef<string | null>(null);
 
   const dismissNotification = (id: string, systemId?: number) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -400,9 +402,31 @@ export default function App() {
   // userOverride: pass the resolved user directly to avoid stale React state closures
   const loadGameFromId = async (id: string, userOverride?: UserAccount | null) => {
     const effectiveUser = userOverride !== undefined ? userOverride : currentUser;
+    
+    // Optimistically transition to game screen with skeleton grid
+    const skeletonState: GameState = {
+      gridWidth: gridSize || 60,
+      gridHeight: gridSize || 60,
+      systems: [],
+      fleets: [],
+      players: playersSetup,
+      playerState: {},
+      turnNumber: 1,
+      activePlayerIdx: 0,
+      combatLog: [],
+      rules: NORMAL_RULES,
+      turnStyle: turnStyle,
+    };
+    setGameState(skeletonState);
+    setScreen('game');
     setIsLoadingGame(true);
+    isCancelledRef.current = false;
+
     const res = await getGame(id);
+    
+    if (isCancelledRef.current) return;
     setIsLoadingGame(false);
+
     if (res.success && res.game) {
       const gameData = res.game;
       const userEmail = effectiveUser?.email || localStorage.getItem('starswarm_guest_name') || null;
@@ -415,11 +439,14 @@ export default function App() {
 
       // If user has no slot and is not the host, show the join request flow
       if (!isOwner && !hasSlot) {
+        setScreen('menu');
+        setGameState(null);
         setActiveGameId(gameData.id);
         setPendingJoinGameId(gameData.id);
         window.history.pushState(null, '', `?gameId=${gameData.inviteCode || gameData.id}`);
         // Check if there's already a pending request for this user
         const statusRes = await checkMyJoinStatus(gameData.id, userEmail || undefined);
+        if (isCancelledRef.current) return;
         setMyJoinStatus(statusRes.success ? (statusRes.status ?? null) : null);
         return;
       }
@@ -447,13 +474,13 @@ export default function App() {
         endedTurn: p.endedTurn
       }));
       setPlayersSetup(setup);
-      setScreen('game');
       window.history.pushState(null, '', `?gameId=${gameData.inviteCode || gameData.id}`);
     } else {
+      setScreen('menu');
+      setGameState(null);
       showError(res.error || 'Failed to load the specified game simulation.');
       clearUrlQuery();
     }
-
   };
 
   // Helper: Clear query parameters from address bar
@@ -480,6 +507,15 @@ export default function App() {
     setGameState(null);
     setScreen('menu');
     loadGamesList();
+  };
+
+  const handleCancelLoading = () => {
+    isCancelledRef.current = true;
+    setIsLoadingGame(false);
+    setGameState(null);
+    setScreen('menu');
+    setActiveGameId(null);
+    clearUrlQuery();
   };
 
   // Helper: Save display name settings globally
@@ -1243,7 +1279,6 @@ export default function App() {
     setImportOriginalVersion(null);
   };
 
-  // Start new game
   const handleStartGame = async () => {
     if (systemCount < playersSetup.length) {
       showError(`Insufficient clusters! Must have at least ${playersSetup.length} systems for this faction count.`);
@@ -1271,28 +1306,69 @@ export default function App() {
       turnStyle: turnStyle,
       seed: gameSeed
     };
-    const initialized = initializeGame(setupOptions);
-    
+
+    // Transition to game screen with just the grid, no nodes
+    const skeletonState: GameState = {
+      gridWidth: gridSize,
+      gridHeight: gridSize,
+      systems: [],
+      fleets: [],
+      players: updatedSetup,
+      playerState: {},
+      turnNumber: 1,
+      activePlayerIdx: 0,
+      combatLog: [],
+      rules: finalRules,
+      turnStyle: turnStyle,
+    };
+    setGameState(skeletonState);
+    setSelectedSystemId(null);
+    setSelectedFleetId(null);
+    setTargetSystem(null);
+    setScreen('game');
+    setIsLoadingGame(true);
+    isCancelledRef.current = false;
+
     const gameName = `Skirmish Match (${new Date().toLocaleDateString()})`;
     const res = await createGame(gameName, null, setupOptions);
+    
+    if (isCancelledRef.current) return;
+
     if (res.success && res.gameId) {
-      setActiveGameId(res.gameId);
-      setGameOwnerEmail(currentUser ? currentUser.email : null);
-      if (!currentUser) {
-        const owned = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-        owned.push(res.gameId);
-        localStorage.setItem('starswarm_owned_games', JSON.stringify(owned));
+      // Fetch the actual initialized game state from the server
+      const getRes = await getGame(res.gameId);
+      
+      if (isCancelledRef.current) return;
+
+      if (getRes.success && getRes.game) {
+        const gameData = getRes.game;
+        setActiveGameId(gameData.id);
+        setGameOwnerEmail(gameData.ownerEmail);
+        if (!currentUser) {
+          const owned = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+          owned.push(gameData.id);
+          localStorage.setItem('starswarm_owned_games', JSON.stringify(owned));
+        }
+        window.history.pushState(null, '', `?gameId=${gameData.inviteCode || gameData.id}`);
+        setGameState(gameData.gameState);
+        setConnectedPlayers(getRes.connectedPlayers || []);
+        
+        const hasMultipleHumans = gameData.gameState.players.filter(p => p.type === 'human').length > 1;
+        setGameMode(hasMultipleHumans ? 'hotseat' : 'skirmish');
+        setTurnStyle(gameData.gameState.turnStyle || 'simultaneous');
+
+        loadGamesList();
+      } else {
+        showError(getRes.error || 'Failed to fetch the initialized game state.');
+        setGameState(null);
+        setScreen('menu');
       }
-      window.history.pushState(null, '', `?gameId=${res.inviteCode || res.gameId}`);
-      setGameState(initialized);
-      setSelectedSystemId(null);
-      setSelectedFleetId(null);
-      setTargetSystem(null);
-      setScreen('game');
-      loadGamesList();
     } else {
       showError(res.error || 'Failed to save new game simulation to database.');
+      setGameState(null);
+      setScreen('menu');
     }
+    setIsLoadingGame(false);
   };
 
   // Initialize unified Skirmish Match Lobby
@@ -1472,6 +1548,44 @@ export default function App() {
 
   const activePlayer = getClientActivePlayer(gameState);
 
+  // Center/select home planet at turn start if an unowned planet is selected
+  React.useEffect(() => {
+    if (screen === 'game' && gameState && activePlayer && activeGameId) {
+      const currentTurnKey = `${activeGameId}-${activePlayer.id}-${gameState.turnNumber}`;
+      if (currentTurnKey !== lastTurnKeyRef.current) {
+        lastTurnKeyRef.current = currentTurnKey;
+
+        if (selectedSystemId !== null) {
+          const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId);
+          if (selectedSystem && selectedSystem.owner !== activePlayer.id) {
+            const homePlanet = gameState.systems.find(s => s.owner === activePlayer.id && s.isHomePlanet);
+            if (homePlanet) {
+              setSelectedSystemId(homePlanet.id);
+              setCenterOnCoords({ x: homePlanet.x, y: homePlanet.y, trigger: Date.now() });
+            }
+          }
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, gameState, activePlayer, activeGameId, selectedSystemId]);
+
+  // Center on home planet when a game loads in
+  React.useEffect(() => {
+    if (screen === 'game' && gameState && activePlayer && activeGameId) {
+      if (activeGameId !== lastLoadedGameIdRef.current) {
+        lastLoadedGameIdRef.current = activeGameId;
+        const homePlanet = gameState.systems.find(s => s.owner === activePlayer.id && s.isHomePlanet);
+        if (homePlanet) {
+          setCenterOnCoords({ x: homePlanet.x, y: homePlanet.y, trigger: Date.now() });
+        }
+      }
+    } else if (screen !== 'game') {
+      lastLoadedGameIdRef.current = null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, gameState, activePlayer, activeGameId]);
+
   if (!gameState && screen === 'game') return null;
 
   // Handle ship scheduling / queuing
@@ -1597,10 +1711,15 @@ export default function App() {
   const handleEndTurn = async () => {
     if (!gameState || !activePlayer || !activeGameId) return;
     
-    // Clear selection UI
-    setSelectedSystemId(null);
-    setSelectedFleetId(null);
-    setTargetSystem(null);
+    // Clear selection UI (only in hotseat mode with multiple local human players to prevent screen-peeping)
+    const localHumansCount = gameState.players.filter(
+      p => p.type === 'human' && !gameState.playerState[p.id]?.lost && isPlayerLocalToClient(p)
+    ).length;
+    if (localHumansCount > 1) {
+      setSelectedSystemId(null);
+      setSelectedFleetId(null);
+      setTargetSystem(null);
+    }
 
     // Play end-turn sound effect if not muted
     if (!soundMutedRef.current) {
@@ -3094,180 +3213,289 @@ export default function App() {
             centerOnCoords={centerOnCoords}
             targetSystemId={targetSystem?.id || null}
           />
-          <Dashboard
-            gameState={gameState}
-            activePlayerId={activePlayer?.id || 1}
-            selectedSystemId={selectedSystemId}
-            selectedFleetId={selectedFleetId}
-            setSelectedSystemId={setSelectedSystemId}
-            setSelectedFleetId={setSelectedFleetId}
-            onEndTurn={handleEndTurn}
-            onReturnToMenu={handleReturnToMenu}
-            onRenamePlayer={handleRenamePlayer}
-            onCancelEndTurn={handleCancelEndTurn}
-            gameName={activeGameName}
-            onRenameGame={handleRenameGame}
-            onQueueShip={handleQueueShip}
-            onUpgradeSystem={handleUpgradeSystem}
-            onDispatchFleet={handleDispatchFleet}
-            onRecallFleet={handleRecallFleet}
-            onCancelDispatch={handleCancelDispatch}
-            onCancelProduction={handleCancelProduction}
-            onCenterOnCoords={(x, y) => setCenterOnCoords({ x, y, trigger: Date.now() })}
-            targetSystem={targetSystem}
-            setTargetSystem={setTargetSystem}
-            currentUserEmail={currentUser?.email || localStorage.getItem('starswarm_guest_name') || ""}
-            gameOwnerEmail={(() => {
-              const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
-              const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-              const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
-              if (gameOwnerEmail) return gameOwnerEmail;
-              if (isLocalOwner && userEmail) return userEmail;
-              return "";
-            })()}
-            connectedPlayers={connectedPlayers}
-            isPlayerLocalToClient={isPlayerLocalToClient}
-            onClaimFaction={handleClaimFaction}
-            onTogglePlayerLocal={handleTogglePlayerLocal}
-            onAssignPlayerEmail={handleAssignPlayerEmail}
-            soundMuted={soundMuted}
-            onToggleSoundMuted={toggleSoundMuted}
-          />
+          {!isLoadingGame ? (
+            <>
+              <Dashboard
+                gameState={gameState}
+                activePlayerId={activePlayer?.id || 1}
+                selectedSystemId={selectedSystemId}
+                selectedFleetId={selectedFleetId}
+                setSelectedSystemId={setSelectedSystemId}
+                setSelectedFleetId={setSelectedFleetId}
+                onEndTurn={handleEndTurn}
+                onReturnToMenu={handleReturnToMenu}
+                onRenamePlayer={handleRenamePlayer}
+                onCancelEndTurn={handleCancelEndTurn}
+                gameName={activeGameName}
+                onRenameGame={handleRenameGame}
+                onQueueShip={handleQueueShip}
+                onUpgradeSystem={handleUpgradeSystem}
+                onDispatchFleet={handleDispatchFleet}
+                onRecallFleet={handleRecallFleet}
+                onCancelDispatch={handleCancelDispatch}
+                onCancelProduction={handleCancelProduction}
+                onCenterOnCoords={(x, y) => setCenterOnCoords({ x, y, trigger: Date.now() })}
+                targetSystem={targetSystem}
+                setTargetSystem={setTargetSystem}
+                currentUserEmail={currentUser?.email || localStorage.getItem('starswarm_guest_name') || ""}
+                gameOwnerEmail={(() => {
+                  const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
+                  const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+                  const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+                  if (gameOwnerEmail) return gameOwnerEmail;
+                  if (isLocalOwner && userEmail) return userEmail;
+                  return "";
+                })()}
+                connectedPlayers={connectedPlayers}
+                isPlayerLocalToClient={isPlayerLocalToClient}
+                onClaimFaction={handleClaimFaction}
+                onTogglePlayerLocal={handleTogglePlayerLocal}
+                onAssignPlayerEmail={handleAssignPlayerEmail}
+                soundMuted={soundMuted}
+                onToggleSoundMuted={toggleSoundMuted}
+              />
 
-          {/* IN-GAME JOIN REQUEST PANEL (host only) */}
-          {(() => {
-            const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
-            const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-            const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
-            const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
-            return isOwner;
-          })() && activeGameId && (homePendingRequests[activeGameId] || []).length > 0 && (() => {
-            const reqs = homePendingRequests[activeGameId] || [];
-            const isPanelOpen = joinPanelGameId === activeGameId;
-            const freeSlots = gameState.players.filter(p => p.type === 'human' && !p.assignedEmail).map(p => ({ id: p.id, name: p.name }));
-            return (
-              <div style={{
-                position: 'absolute',
-                top: '90px',
-                right: '420px',
-                zIndex: 50,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                pointerEvents: 'auto',
-                maxWidth: '300px'
-              }}>
-                <div
-                  style={{
-                    background: 'rgba(0, 240, 255, 0.12)',
-                    border: '1px solid var(--accent-cyan)',
-                    borderRadius: '8px',
-                    padding: '8px 14px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    boxShadow: '0 0 15px rgba(0,240,255,0.2)'
-                  }}
-                  onClick={() => setJoinPanelGameId(isPanelOpen ? null : activeGameId)}
-                >
-                  <span style={{ fontSize: '16px' }}>📡</span>
-                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
-                    {reqs.length} JOIN REQUEST{reqs.length > 1 ? 'S' : ''}
-                  </span>
-                  <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)', transform: isPanelOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
-                </div>
-
-                {isPanelOpen && (
+              {/* IN-GAME JOIN REQUEST PANEL (host only) */}
+              {(() => {
+                const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
+                const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+                const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
+                const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
+                return isOwner;
+              })() && activeGameId && (homePendingRequests[activeGameId] || []).length > 0 && (() => {
+                const reqs = homePendingRequests[activeGameId] || [];
+                const isPanelOpen = joinPanelGameId === activeGameId;
+                const freeSlots = gameState.players.filter(p => p.type === 'human' && !p.assignedEmail).map(p => ({ id: p.id, name: p.name }));
+                return (
                   <div style={{
-                    background: 'rgba(5, 15, 30, 0.96)',
-                    border: '1px solid rgba(0,240,255,0.25)',
-                    borderRadius: '8px',
-                    padding: '12px',
+                    position: 'absolute',
+                    top: '90px',
+                    right: '420px',
+                    zIndex: 50,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+                    pointerEvents: 'auto',
+                    maxWidth: '300px'
                   }}>
-                    {reqs.map(req => (
-                      <div key={req.id} style={{
-                        background: 'rgba(255,255,255,0.03)',
-                        border: '1px solid rgba(255,255,255,0.07)',
-                        borderRadius: '6px',
-                        padding: '8px 10px',
+                    <div
+                      style={{
+                        background: 'rgba(0, 240, 255, 0.12)',
+                        border: '1px solid var(--accent-cyan)',
+                        borderRadius: '8px',
+                        padding: '8px 14px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        boxShadow: '0 0 15px rgba(0,240,255,0.2)'
+                      }}
+                      onClick={() => setJoinPanelGameId(isPanelOpen ? null : activeGameId)}
+                    >
+                      <span style={{ fontSize: '16px' }}>📡</span>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
+                        {reqs.length} JOIN REQUEST{reqs.length > 1 ? 'S' : ''}
+                      </span>
+                      <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)', transform: isPanelOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                    </div>
+
+                    {isPanelOpen && (
+                      <div style={{
+                        background: 'rgba(5, 15, 30, 0.96)',
+                        border: '1px solid rgba(0,240,255,0.25)',
+                        borderRadius: '8px',
+                        padding: '12px',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '6px'
+                        gap: '8px',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
                       }}>
-                        <div style={{ fontSize: '11px', color: 'white', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {req.email}
-                        </div>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                          {freeSlots.length > 0 ? (
-                            <>
-                              <select
-                                value={joinAssignSlot[req.id] || freeSlots[0].id}
-                                onChange={e => setJoinAssignSlot(prev => ({ ...prev, [req.id]: parseInt(e.target.value) }))}
-                                style={{
-                                  flex: 1,
-                                  background: 'rgba(0,0,0,0.7)',
-                                  border: '1px solid rgba(0,240,255,0.3)',
-                                  color: 'white',
-                                  borderRadius: '4px',
-                                  padding: '3px 6px',
-                                  fontSize: '10px',
-                                  fontFamily: 'Share Tech Mono'
-                                }}
-                              >
-                                {freeSlots.map(slot => (
-                                  <option key={slot.id} value={slot.id}>{slot.name}</option>
-                                ))}
-                              </select>
+                        {reqs.map(req => (
+                          <div key={req.id} style={{
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid rgba(255,255,255,0.07)',
+                            borderRadius: '6px',
+                            padding: '8px 10px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px'
+                          }}>
+                            <div style={{ fontSize: '11px', color: 'white', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {req.email}
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                              {freeSlots.length > 0 ? (
+                                <>
+                                  <select
+                                    value={joinAssignSlot[req.id] || freeSlots[0].id}
+                                    onChange={e => setJoinAssignSlot(prev => ({ ...prev, [req.id]: parseInt(e.target.value) }))}
+                                    style={{
+                                      flex: 1,
+                                      background: 'rgba(0,0,0,0.7)',
+                                      border: '1px solid rgba(0,240,255,0.3)',
+                                      color: 'white',
+                                      borderRadius: '4px',
+                                      padding: '3px 6px',
+                                      fontSize: '10px',
+                                      fontFamily: 'Share Tech Mono'
+                                    }}
+                                  >
+                                    {freeSlots.map(slot => (
+                                      <option key={slot.id} value={slot.id}>{slot.name}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    className="btn-sci-fi"
+                                    style={{ padding: '3px 8px', fontSize: '9px' }}
+                                    onClick={async () => {
+                                      const slotId = joinAssignSlot[req.id] || freeSlots[0].id;
+                                      const res = await acceptJoinRequest(activeGameId, req.id, slotId, req.email);
+                                      if (res.success) {
+                                        showToast(`✅ ${req.email} assigned!`, 'success');
+                                        setHomePendingRequests(h => ({ ...h, [activeGameId]: (h[activeGameId] || []).filter(r => r.id !== req.id) }));
+                                        // Refresh game state so slot assignment is visible
+                                        loadGameFromId(activeGameId);
+                                      } else {
+                                        showError(res.error || 'Failed to assign slot.');
+                                      }
+                                    }}
+                                  >
+                                    ACCEPT
+                                  </button>
+                                </>
+                              ) : (
+                                <span style={{ fontSize: '9px', color: 'var(--accent-yellow)', fontFamily: 'Share Tech Mono' }}>No free slots</span>
+                              )}
                               <button
-                                className="btn-sci-fi"
+                                className="btn-sci-fi btn-danger"
                                 style={{ padding: '3px 8px', fontSize: '9px' }}
                                 onClick={async () => {
-                                  const slotId = joinAssignSlot[req.id] || freeSlots[0].id;
-                                  const res = await acceptJoinRequest(activeGameId, req.id, slotId, req.email);
+                                  const res = await rejectJoinRequest(activeGameId, req.id);
                                   if (res.success) {
-                                    showToast(`✅ ${req.email} assigned!`, 'success');
+                                    showToast(`❌ Rejected ${req.email}`, 'warning', 3000);
                                     setHomePendingRequests(h => ({ ...h, [activeGameId]: (h[activeGameId] || []).filter(r => r.id !== req.id) }));
-                                    // Refresh game state so slot assignment is visible
-                                    loadGameFromId(activeGameId);
                                   } else {
-                                    showError(res.error || 'Failed to assign slot.');
+                                    showError(res.error || 'Failed to reject.');
                                   }
                                 }}
                               >
-                                ACCEPT
+                                REJECT
                               </button>
-                            </>
-                          ) : (
-                            <span style={{ fontSize: '9px', color: 'var(--accent-yellow)', fontFamily: 'Share Tech Mono' }}>No free slots</span>
-                          )}
-                          <button
-                            className="btn-sci-fi btn-danger"
-                            style={{ padding: '3px 8px', fontSize: '9px' }}
-                            onClick={async () => {
-                              const res = await rejectJoinRequest(activeGameId, req.id);
-                              if (res.success) {
-                                showToast(`❌ Rejected ${req.email}`, 'warning', 3000);
-                                setHomePendingRequests(h => ({ ...h, [activeGameId]: (h[activeGameId] || []).filter(r => r.id !== req.id) }));
-                              } else {
-                                showError(res.error || 'Failed to reject.');
-                              }
-                            }}
-                          >
-                            REJECT
-                          </button>
-                        </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
+                );
+              })()}
+            </>
+          ) : (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              backgroundColor: 'rgba(5, 3, 13, 0.45)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              color: 'var(--text-primary)',
+              fontFamily: '"Share Tech Mono", monospace'
+            }}>
+              {/* Sci-fi Loading Card */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '24px',
+                padding: '40px 50px',
+                borderRadius: '16px',
+                border: '1px solid rgba(0, 240, 255, 0.3)',
+                background: 'rgba(10, 7, 24, 0.85)',
+                boxShadow: '0 0 40px rgba(0, 240, 255, 0.15), inset 0 0 20px rgba(0, 240, 255, 0.05)',
+                maxWidth: '480px',
+                width: '90%',
+                textAlign: 'center'
+              }}>
+                <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto' }}>
+                  {/* Glowing, rotating outer ring */}
+                  <div className="spin-loader" style={{
+                    width: '100%',
+                    height: '100%',
+                    border: '3px solid transparent',
+                    borderTopColor: 'var(--accent-cyan)',
+                    borderBottomColor: 'var(--accent-cyan)',
+                    borderRadius: '50%'
+                  }} />
+                  {/* Inner pulsing star core */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '25%',
+                    left: '25%',
+                    width: '50%',
+                    height: '50%',
+                    backgroundColor: 'var(--accent-magenta)',
+                    borderRadius: '50%',
+                    boxShadow: '0 0 15px var(--accent-magenta)',
+                    animation: 'pulse 1.2s ease-in-out infinite alternate'
+                  }} />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <h2 style={{
+                    letterSpacing: '3px',
+                    color: 'var(--accent-cyan)',
+                    textShadow: '0 0 10px rgba(0, 240, 255, 0.6)',
+                    margin: 0,
+                    fontSize: '20px',
+                    fontWeight: 700
+                  }}>
+                    INITIALIZING SIMULATION
+                  </h2>
+                  <div style={{
+                    fontSize: '13px',
+                    color: 'var(--text-secondary)',
+                    letterSpacing: '1px',
+                    textTransform: 'uppercase'
+                  }} className="pulse-light">
+                    Synchronizing quantum grid nodes...
+                  </div>
+                </div>
+
+                {/* Subtext info */}
+                <div style={{
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                  paddingTop: '16px',
+                  width: '100%',
+                  lineHeight: '1.6'
+                }}>
+                  Connecting to Star-Swarm core server. Constructing visual grid matrix. Please stand by, Admiral.
+                </div>
+
+                <button 
+                  className="btn-sci-fi btn-danger" 
+                  onClick={handleCancelLoading} 
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    justifyContent: 'center',
+                    fontWeight: 600,
+                    letterSpacing: '1.5px',
+                    fontSize: '12px'
+                  }}
+                >
+                  ABORT SIMULATION
+                </button>
               </div>
-            );
-          })()}
+            </div>
+          )}
         </div>
       )}
 
