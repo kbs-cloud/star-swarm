@@ -239,20 +239,6 @@ body {
   animation: spin 1.5s linear infinite;
 }
 
-
-
-.shader-canvas {
-  display: block;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: -1;
-}
-
 /* Minimalist floating author notice */
 .author-notice {
   position: absolute;
