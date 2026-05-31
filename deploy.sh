@@ -5,7 +5,7 @@ echo "=== Starting deployment to ~/live/starswarm ==="
 
 # 1. Sync files from Public/starswarm to live/starswarm
 echo "Syncing files..."
-rsync -av --delete \
+sudo rsync -av --delete \
   --exclude 'node_modules/' \
   --exclude '.git/' \
   --exclude 'starswarm.db' \
@@ -20,7 +20,7 @@ cd /home/gemini/live/starswarm
 
 # 3. Restart the systemd user service
 echo "Restarting starswarm systemd service..."
-systemctl daemon-reload
-systemctl restart starswarm.service
+sudo systemctl daemon-reload
+sudo systemctl restart starswarm.service
 
 echo "=== Deployment finished successfully ==="

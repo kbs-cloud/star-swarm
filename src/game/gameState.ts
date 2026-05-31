@@ -1315,3 +1315,80 @@ export function logAction(
   }
 }
 
+export function checkGameOver(state: GameState): boolean {
+  const activeTeams = new Set();
+  state.players.forEach(p => {
+    const pState = state.playerState[p.id];
+    if (pState && !pState.lost) {
+      activeTeams.add(p.team);
+    }
+  });
+  return activeTeams.size <= 1;
+}
+
+export function advanceSequentialTurns(
+  state: GameState,
+  runAITurnFn: (state: GameState, playerId: number) => void
+): void {
+  if (state.turnStyle !== 'sequential') return;
+
+  let roundInProgress = true;
+  while (roundInProgress) {
+    if (checkGameOver(state)) {
+      break;
+    }
+
+    // 1. Check if the current active player is an AI and needs to play
+    const activePlayer = state.players[state.activePlayerIdx];
+    if (activePlayer && activePlayer.type === 'ai' && !state.playerState[activePlayer.id].lost && !activePlayer.endedTurn) {
+      runAITurnFn(state, activePlayer.id);
+      activePlayer.endedTurn = true;
+    }
+
+    // 2. Check if all active players (both human and AI) have ended their turns
+    const activePlayers = state.players.filter(p => !state.playerState[p.id].lost);
+    const allActiveEnded = activePlayers.every(p => p.endedTurn);
+
+    if (allActiveEnded) {
+      // Roll over round
+      processTurnEnd(state);
+
+      // Reset endedTurn flags for all players for the new round
+      state.players.forEach(p => {
+        p.endedTurn = false;
+      });
+
+      // Set active player back to the first active player (human or AI)
+      const firstActive = state.players.find(p => !state.playerState[p.id].lost);
+      if (firstActive) {
+        state.activePlayerIdx = state.players.indexOf(firstActive);
+      } else {
+        break;
+      }
+    } else {
+      // If current active player has ended their turn, transition to the next player in order
+      const currentActive = state.players[state.activePlayerIdx];
+      if (currentActive && currentActive.endedTurn) {
+        let nextIdx = state.activePlayerIdx;
+        let foundNext = false;
+        for (let i = 0; i < state.players.length; i++) {
+          nextIdx = (nextIdx + 1) % state.players.length;
+          const p = state.players[nextIdx];
+          if (!state.playerState[p.id].lost && !p.endedTurn) {
+            state.activePlayerIdx = nextIdx;
+            foundNext = true;
+            break;
+          }
+        }
+        if (!foundNext) {
+          break;
+        }
+      } else {
+        // Active player is human and hasn't ended their turn. Wait for user input.
+        roundInProgress = false;
+      }
+    }
+  }
+}
+
+

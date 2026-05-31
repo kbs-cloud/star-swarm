@@ -1,4 +1,4 @@
-// Star-Swarm Authentication & User Statistics Client (TypeScript)
+import { authService } from './services';
 
 export interface UserStats {
   gamesPlayed: number;
@@ -13,9 +13,6 @@ export interface UserAccount {
   stats: UserStats;
 }
 
-// Memory cache for synchronous UI queries
-let currentUserCache: UserAccount | null = null;
-
 /**
  * Extracts a cookie value by name from document.cookie.
  */
@@ -28,156 +25,57 @@ export function getCookie(name: string): string | null {
 }
 
 /**
- * Helper to build default headers with CSRF double-submit token.
- */
-function getHeaders(): Record<string, string> {
-  const csrfToken = getCookie('csrf_token') || '';
-  const guestName = localStorage.getItem('starswarm_guest_name') || '';
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-CSRF-Token': csrfToken
-  };
-  if (guestName) {
-    headers['X-Guest-Name'] = guestName;
-    headers['X-Guest-Email'] = guestName;
-  }
-  return headers;
-}
-
-/**
  * Bootstraps the CSRF handshake token.
  */
 export async function initCSRF(): Promise<void> {
-  try {
-    await fetch('/api/csrf-init');
-  } catch (e) {
-    console.error('Failed to initialize CSRF token handshake:', e);
-  }
+  return authService.initCSRF();
 }
 
 /**
- * Calls `/api/register` to register a new account on the server.
+ * Calls registration to register a new account.
  */
 export async function registerUser(email: string, password?: string): Promise<{ success: boolean; message: string }> {
-  try {
-    const response = await fetch('/api/register', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ email, password })
-    });
-
-    const data = await response.json();
-    if (response.ok) {
-      return { success: true, message: data.message || 'Account registered successfully.' };
-    } else {
-      return { success: false, message: data.error || 'Failed to register account.' };
-    }
-  } catch (e) {
-    return { success: false, message: 'Server connection failed.' };
-  }
+  return authService.registerUser(email, password);
 }
 
 /**
- * Calls `/api/login` to authenticate using email and password.
+ * Authenticates using email and password.
  */
 export async function loginUser(email: string, password: string): Promise<{ success: boolean; message: string; user?: UserAccount }> {
-  try {
-    const response = await fetch('/api/login', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ email, password })
-    });
-
-    const data = await response.json();
-    if (response.ok && data.success) {
-      currentUserCache = data.user;
-      return { success: true, message: 'Logged in successfully.', user: data.user };
-    } else {
-      return { success: false, message: data.error || 'Invalid credentials.' };
-    }
-  } catch (e) {
-    return { success: false, message: 'Server connection failed.' };
-  }
+  return authService.loginUser(email, password);
 }
-
 
 /**
- * Checks if real Google OAuth is configured on the backend.
+ * Checks if real Google OAuth is configured.
  */
 export async function checkGoogleOAuthConfig(): Promise<{ enabled: boolean }> {
-  try {
-    const response = await fetch('/api/auth/google/config');
-    if (response.ok) {
-      const data = await response.json();
-      return { enabled: !!data.enabled };
-    }
-  } catch (e) {
-    console.error('Failed to check Google OAuth configuration status:', e);
-  }
-  return { enabled: false };
+  return authService.checkGoogleOAuthConfig();
 }
-
 
 /**
  * Checks if the user is already authenticated via cookies.
  */
 export async function checkSession(): Promise<UserAccount | null> {
-  try {
-    const response = await fetch('/api/me');
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success) {
-        currentUserCache = data.user;
-        return data.user;
-      }
-    }
-  } catch (e) {
-    console.error('Failed to verify active user session cookie:', e);
-  }
-  currentUserCache = null;
-  return null;
+  return authService.checkSession();
 }
 
 /**
  * Synchronous query for the active session cache.
  */
 export function getCurrentUser(): UserAccount | null {
-  return currentUserCache;
+  return authService.getCurrentUser();
 }
 
 /**
  * Logs out and clears the session cookie.
  */
 export async function logoutUser(): Promise<void> {
-  try {
-    await fetch('/api/logout', {
-      method: 'POST',
-      headers: getHeaders()
-    });
-  } catch (e) {
-    console.error('Logout request failed:', e);
-  }
-  currentUserCache = null;
+  return authService.logoutUser();
 }
 
 /**
- * Updates win/loss telemetry stats on the server.
+ * Updates win/loss telemetry stats.
  */
-export async function recordGameStats(_email: string, won: boolean): Promise<void> {
-  try {
-    const response = await fetch('/api/stats', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ won })
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.stats && currentUserCache) {
-        currentUserCache.stats = data.stats;
-      }
-    }
-  } catch (e) {
-    console.error('Failed to sync telemetry stats with backend:', e);
-  }
+export async function recordGameStats(email: string, won: boolean): Promise<void> {
+  return authService.recordGameStats(email, won);
 }

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserAccount } from '../../game/auth';
+import { isElectronMode } from '../../utils/env';
 
 interface AuthBarProps {
   currentUser: UserAccount | null;
@@ -226,16 +227,18 @@ export const AuthBar: React.FC<AuthBarProps> = ({
                 >
                   SETTINGS
                 </button>
-                <button 
-                  className="btn-sci-fi btn-danger" 
-                  style={{ padding: '6px 12px', fontSize: '11px', justifyContent: 'flex-start', width: '100%' }} 
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    onLogout();
-                  }}
-                >
-                  LOG OUT
-                </button>
+                {!isElectronMode() && (
+                  <button 
+                    className="btn-sci-fi btn-danger" 
+                    style={{ padding: '6px 12px', fontSize: '11px', justifyContent: 'flex-start', width: '100%' }} 
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onLogout();
+                    }}
+                  >
+                    LOG OUT
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -317,7 +320,9 @@ export const AuthBar: React.FC<AuthBarProps> = ({
       {currentUser ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>COMMAND CODES ACTIVE</div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
+              {isElectronMode() ? 'OFFLINE COMMAND LINK' : 'COMMAND CODES ACTIVE'}
+            </div>
             <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent-cyan)' }}>
               {currentUser.displayName || currentUser.email}
             </div>
@@ -328,9 +333,11 @@ export const AuthBar: React.FC<AuthBarProps> = ({
           <button className="btn-sci-fi" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onNavigateSettings}>
             SETTINGS
           </button>
-          <button className="btn-sci-fi btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onLogout}>
-            LOG OUT
-          </button>
+          {!isElectronMode() && (
+            <button className="btn-sci-fi btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onLogout}>
+              LOG OUT
+            </button>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>

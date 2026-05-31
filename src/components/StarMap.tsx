@@ -39,6 +39,11 @@ export const StarMap: React.FC<StarMapProps> = ({
   const [hoveredSysId, setHoveredSysId] = useState<number | null>(null);
   const [hoveredFleetId, setHoveredFleetId] = useState<string | null>(null);
   const [showZoomMenu, setShowZoomMenu] = useState<boolean>(false);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    system: StarSystem;
+  } | null>(null);
 
   // Mouse drag states
   const isDragging = useRef<boolean>(false);
@@ -47,9 +52,18 @@ export const StarMap: React.FC<StarMapProps> = ({
   const touchStartDist = useRef<number>(0);
   const touchStartZoom = useRef<number>(1.0);
   const touchStartMidpoint = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressActive = useRef<boolean>(false);
 
   // Calculate Active Vision
   const vision = computeVision(gameState, activePlayerId);
+
+  const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId);
+  const alliedPlayerIds = gameState.players
+    .filter(p => p.team === gameState.playerState[activePlayerId]?.team)
+    .map(p => p.id);
+  const isFriendlySystemSelected = selectedSystem && alliedPlayerIds.includes(selectedSystem.owner);
+  const isFleetSelected = !!selectedFleetId;
 
   // Grid sizing constants
   const mapWidth = gameState.gridWidth;
@@ -324,26 +338,51 @@ export const StarMap: React.FC<StarMapProps> = ({
     };
   }, [gameState, activePlayerId, zoom, panX, panY, selectedSystemId, selectedFleetId, hoveredSysId, hoveredFleetId, vision, targetSystemId]);
 
-  const handleSelectionAtCoords = (clickX: number, clickY: number, isCtrl: boolean) => {
-    // 1. Check if clicked a star system (within a radius of 15px)
-    let clickedSys: StarSystem | null = null;
+  const findSystemAtCoords = (clickX: number, clickY: number) => {
     const selectThreshold = 15;
-
     for (const sys of gameState.systems) {
       const sysScreenX = sys.x * cellSize * zoom + panX;
       const sysScreenY = sys.y * cellSize * zoom + panY;
       const dist = Math.sqrt((sysScreenX - clickX) ** 2 + (sysScreenY - clickY) ** 2);
       if (dist <= selectThreshold) {
-        clickedSys = sys;
-        break;
+        return sys;
       }
     }
+    return null;
+  };
+
+  const getConstrainedMenuPos = (clickX: number, clickY: number, rectWidth: number, rectHeight: number) => {
+    const menuWidth = 190;
+    const menuHeight = 140;
+
+    let posX = clickX + 10;
+    let posY = clickY + 10;
+
+    if (posX + menuWidth > rectWidth) {
+      posX = clickX - menuWidth - 10;
+    }
+    if (posY + menuHeight > rectHeight) {
+      posY = clickY - menuHeight - 10;
+    }
+
+    posX = Math.max(10, Math.min(posX, rectWidth - menuWidth - 10));
+    posY = Math.max(10, Math.min(posY, rectHeight - menuHeight - 10));
+
+    return { x: posX, y: posY };
+  };
+
+  const handleSelectionAtCoords = (clickX: number, clickY: number, isCtrl: boolean) => {
+    // Close context menu on normal selection click
+    setContextMenu(null);
+
+    // 1. Check if clicked a star system (within a radius of 15px)
+    const clickedSys = findSystemAtCoords(clickX, clickY);
 
     if (clickedSys) {
       setSelectedFleetId(null);
 
-      // If we already have a system selected, and we Ctrl + click another system (or targeting mode is active), trigger targeting
-      if (selectedSystemId && selectedSystemId !== clickedSys.id && (isCtrl || isSelectingTarget)) {
+      // If we already have a system selected, and we Ctrl + click another system (or targeting mode is active, or a friendly system is selected), trigger targeting
+      if (selectedSystemId && selectedSystemId !== clickedSys.id && (isCtrl || isSelectingTarget || isFriendlySystemSelected)) {
         onSelectTargetSystem(clickedSys);
       } else {
         setSelectedSystemId(clickedSys.id);
@@ -354,6 +393,7 @@ export const StarMap: React.FC<StarMapProps> = ({
     // 2. Check if clicked a fleet (within 15px screen distance)
     let clickedFleet: Fleet | null = null;
     const visibleFleets = gameState.fleets.filter(f => vision.fleets.has(f.id));
+    const selectThreshold = 15;
 
     for (const fleet of visibleFleets) {
       const fleetScreenX = fleet.currentPos.x * cellSize * zoom + panX;
@@ -404,6 +444,7 @@ export const StarMap: React.FC<StarMapProps> = ({
       const dy = my - dragStart.current.y;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
         dragMoved.current = true;
+        setContextMenu(null); // Close context menu on pan drag
       }
       if (dragMoved.current) {
         setPanX(px => px + dx);
@@ -446,6 +487,7 @@ export const StarMap: React.FC<StarMapProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    setContextMenu(null); // Close context menu on mouse down
     if (e.button === 0) { // left click drag to pan
       isDragging.current = true;
       dragMoved.current = false;
@@ -461,25 +503,50 @@ export const StarMap: React.FC<StarMapProps> = ({
     isDragging.current = false;
   };
 
-  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchStart = (e: TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+
+    setContextMenu(null); // Close context menu on touch start
 
     if (e.touches.length === 1) {
       // Single touch drag to pan
       isDragging.current = true;
       dragMoved.current = false;
       const touch = e.touches[0];
-      dragStart.current = {
-        x: touch.clientX - rect.left,
-        y: touch.clientY - rect.top,
-      };
+      const startX = touch.clientX - rect.left;
+      const startY = touch.clientY - rect.top;
+      dragStart.current = { x: startX, y: startY };
       touchStartDist.current = 0;
+
+      // Start long press timer
+      longPressActive.current = false;
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+
+      const clickedSys = findSystemAtCoords(startX, startY);
+      if (clickedSys) {
+        longPressTimer.current = setTimeout(() => {
+          longPressActive.current = true;
+          const pos = getConstrainedMenuPos(startX, startY, rect.width, rect.height);
+          setContextMenu({
+            x: pos.x,
+            y: pos.y,
+            system: clickedSys
+          });
+          if (navigator.vibrate) {
+            navigator.vibrate(50);
+          }
+        }, 600);
+      }
     } else if (e.touches.length === 2) {
       // Dual touch pinch to zoom
       isDragging.current = false;
       dragMoved.current = false;
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
       const dist = Math.sqrt((touch1.clientX - touch2.clientX) ** 2 + (touch1.clientY - touch2.clientY) ** 2);
@@ -492,7 +559,7 @@ export const StarMap: React.FC<StarMapProps> = ({
     }
   };
 
-  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchMove = (e: TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -504,15 +571,30 @@ export const StarMap: React.FC<StarMapProps> = ({
       const my = touch.clientY - rect.top;
       const dx = mx - dragStart.current.x;
       const dy = my - dragStart.current.y;
+
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+      }
+
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
         dragMoved.current = true;
       }
+
+      if (longPressActive.current) return;
+
       if (dragMoved.current) {
         setPanX(px => px + dx);
         setPanY(py => py + dy);
         dragStart.current = { x: mx, y: my };
       }
     } else if (e.touches.length === 2 && touchStartDist.current > 0) {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
       // Pinch to Zoom
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -530,10 +612,26 @@ export const StarMap: React.FC<StarMapProps> = ({
       setZoom(newZoom);
       setPanX(newPanX);
       setPanY(newPanY);
+    } else {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
     }
   };
 
-  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+  const handleTouchEnd = (_e: TouchEvent) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+
+    if (longPressActive.current) {
+      isDragging.current = false;
+      longPressActive.current = false;
+      return;
+    }
+
     if (isDragging.current && !dragMoved.current) {
       // Tap selection
       handleSelectionAtCoords(dragStart.current.x, dragStart.current.y, false);
@@ -543,8 +641,8 @@ export const StarMap: React.FC<StarMapProps> = ({
   };
 
   // Zoom with scroll wheel centered at current mouse cursor
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
+  const handleWheel = (e: WheelEvent) => {
+    setContextMenu(null); // Close context menu on zoom wheel
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -567,9 +665,92 @@ export const StarMap: React.FC<StarMapProps> = ({
     setPanY(newPanY);
   };
 
+  const handleContextMenuNative = (e: MouseEvent) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    const clickedSys = findSystemAtCoords(clickX, clickY);
+    if (clickedSys) {
+      const pos = getConstrainedMenuPos(clickX, clickY, rect.width, rect.height);
+      setContextMenu({
+        x: pos.x,
+        y: pos.y,
+        system: clickedSys
+      });
+    } else {
+      setContextMenu(null);
+    }
+  };
+
+  // Event handler refs to prevent recreation of event listeners
+  const touchStartRef = useRef(handleTouchStart);
+  const touchMoveRef = useRef(handleTouchMove);
+  const touchEndRef = useRef(handleTouchEnd);
+  const wheelRef = useRef(handleWheel);
+  const contextMenuRef = useRef(handleContextMenuNative);
+
+  useEffect(() => {
+    touchStartRef.current = handleTouchStart;
+    touchMoveRef.current = handleTouchMove;
+    touchEndRef.current = handleTouchEnd;
+    wheelRef.current = handleWheel;
+    contextMenuRef.current = handleContextMenuNative;
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      touchStartRef.current(e);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      touchMoveRef.current(e);
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      touchEndRef.current(e);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      wheelRef.current(e);
+    };
+
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      contextMenuRef.current(e);
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('contextmenu', onContextMenu, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('contextmenu', onContextMenu);
+    };
+  }, []);
+
   // Find active systems coordinates for selected system to display on tooltip
   const activeSystem = gameState.systems.find(s => s.id === selectedSystemId);
   const activeFleet = gameState.fleets.find(f => f.id === selectedFleetId);
+
+
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
@@ -606,15 +787,11 @@ export const StarMap: React.FC<StarMapProps> = ({
       )}
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', cursor: isDragging.current ? 'grabbing' : 'grab' }}
+        style={{ width: '100%', height: '100%', display: 'block', cursor: isDragging.current ? 'grabbing' : 'grab', touchAction: 'none' }}
         onClick={handleCanvasClick}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       />
 
       {/* Telemetry panel (Zoom / Pan Coordinates) */}
@@ -703,6 +880,155 @@ export const StarMap: React.FC<StarMapProps> = ({
           🔍
         </button>
       </div>
+
+      {contextMenu && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: `${contextMenu.y}px`,
+            left: `${contextMenu.x}px`,
+            background: 'rgba(6, 4, 18, 0.95)',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid var(--accent-cyan)',
+            boxShadow: '0 0 20px rgba(0, 240, 255, 0.25)',
+            borderRadius: '6px',
+            padding: '8px 0',
+            minWidth: '180px',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            fontFamily: 'Orbitron, sans-serif'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{
+            padding: '4px 14px 8px 14px',
+            borderBottom: '1px solid rgba(0, 240, 255, 0.15)',
+            marginBottom: '4px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px'
+          }}>
+            <span style={{ fontSize: '11px', color: '#fff', fontWeight: 'bold', letterSpacing: '1px' }}>
+              {contextMenu.system.name}
+            </span>
+            <span style={{ fontSize: '8px', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono' }}>
+              COORD: {contextMenu.system.x}, {contextMenu.system.y} LY
+            </span>
+          </div>
+
+          <button
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#e2e8f0',
+              padding: '8px 14px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              fontSize: '11px',
+              letterSpacing: '1px',
+              transition: 'background 0.15s, color 0.15s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+            onClick={() => {
+              setSelectedFleetId(null);
+              setSelectedSystemId(contextMenu.system.id);
+              setContextMenu(null);
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(0, 240, 255, 0.1)';
+              e.currentTarget.style.color = 'var(--accent-cyan)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = '#e2e8f0';
+            }}
+          >
+            <span>🔍</span> INSPECT SYSTEM
+          </button>
+
+          {contextMenu.system.id !== selectedSystemId && (isFriendlySystemSelected || isFleetSelected) ? (
+            <button
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--accent-green)',
+                padding: '8px 14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                fontSize: '11px',
+                letterSpacing: '1px',
+                transition: 'background 0.15s, color 0.15s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontWeight: 'bold'
+              }}
+              onClick={() => {
+                onSelectTargetSystem(contextMenu.system);
+                setContextMenu(null);
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(57, 255, 20, 0.15)';
+                e.currentTarget.style.textShadow = '0 0 5px rgba(57, 255, 20, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.textShadow = 'none';
+              }}
+            >
+              <span>🎯</span> SET AS TARGET
+            </button>
+          ) : (
+            <div
+              style={{
+                color: 'rgba(255, 255, 255, 0.3)',
+                padding: '8px 14px',
+                fontSize: '10px',
+                letterSpacing: '0.5px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'not-allowed'
+              }}
+              title="Select a friendly system or fleet first to target this destination"
+            >
+              <span>🔒</span> TARGETING LOCKED
+            </div>
+          )}
+
+          <button
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              padding: '6px 14px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              fontSize: '10px',
+              letterSpacing: '1.5px',
+              transition: 'background 0.15s',
+              marginTop: '4px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+            onClick={() => setContextMenu(null)}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <span>❌</span> CLOSE MENU
+          </button>
+        </div>
+      )}
     </div>
   );
 };

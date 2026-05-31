@@ -1,5 +1,6 @@
 import { PlayerSetup } from './types';
 import React, { useState, useRef, useEffect } from 'react';
+import { isElectronMode } from './utils/env';
 import {
   GameState,
   StarSystem,
@@ -913,7 +914,7 @@ export default function App() {
 
   // Periodic polling loop for game state & presence updates
   React.useEffect(() => {
-    if (!activeGameId || screen !== 'game') return;
+    if (!activeGameId || screen !== 'game' || isElectronMode()) return;
 
     let isSubscribed = true;
     const poll = async () => {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { GameRules, FACTION_INFO } from '../../game/gameState';
 import { PlayerSetup } from '../../types';
+import { isElectronMode } from '../../utils/env';
 
 interface LobbyScreenProps {
   gridSize: number;
@@ -354,10 +355,11 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
             {playersSetup.map((player, idx) => {
               const factionColor = player.color || FACTION_INFO[player.id]?.color || '#ffffff';
+              const isElectron = isElectronMode();
               return (
                 <div key={player.id} style={{
                   display: 'grid',
-                  gridTemplateColumns: '24px 1.5fr 1fr 1fr 90px 2fr 32px',
+                  gridTemplateColumns: isElectron ? '24px 2fr 1fr 1.2fr 32px' : '24px 1.5fr 1fr 1fr 90px 2fr 32px',
                   gap: '8px',
                   alignItems: 'center',
                   background: 'rgba(255,255,255,0.02)',
@@ -443,42 +445,46 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   </div>
 
                   {/* Local Playable Checkbox */}
-                  {player.type === 'human' ? (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!player.isLocal}
-                        disabled={idx === 0}
-                        onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
-                        style={{ accentColor: 'var(--accent-cyan)' }}
-                      />
-                      <span>LOCAL</span>
-                    </label>
-                  ) : (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center' }}>-</div>
+                  {!isElectron && (
+                    player.type === 'human' ? (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!player.isLocal}
+                          disabled={idx === 0}
+                          onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
+                          style={{ accentColor: 'var(--accent-cyan)' }}
+                        />
+                        <span>LOCAL</span>
+                      </label>
+                    ) : (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center' }}>-</div>
+                    )
                   )}
 
                   {/* Assigned Email */}
-                  {player.type === 'human' ? (
-                    <input
-                      type="text"
-                      placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
-                      value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
-                      disabled={idx === 0}
-                      onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
-                      style={{
-                        background: 'rgba(0,0,0,0.5)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: 'white',
-                        padding: '6px 8px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        width: '100%',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  ) : (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center', fontFamily: 'Share Tech Mono' }}>[AI SYSTEM]</div>
+                  {!isElectron && (
+                    player.type === 'human' ? (
+                      <input
+                        type="text"
+                        placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
+                        value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
+                        disabled={idx === 0}
+                        onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
+                        style={{
+                          background: 'rgba(0,0,0,0.5)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          color: 'white',
+                          padding: '6px 8px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          width: '100%',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    ) : (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center', fontFamily: 'Share Tech Mono' }}>[AI SYSTEM]</div>
+                    )
                   )}
  
                   {/* Remove Button */}

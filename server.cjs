@@ -16,7 +16,8 @@ const {
   cancelDispatch,
   cancelProduction,
   processTurnEnd,
-  logAction
+  logAction,
+  advanceSequentialTurns
 } = require('./src/game/dist/gameState.js');
 const { runAITurn } = require('./src/game/dist/ai.js');
 
@@ -954,79 +955,7 @@ app.put('/api/games/:id', validateCSRF, (req, res) => {
   });
 });
 
-// Helper functions for server-side turn & game resolution
-function checkGameOver(state) {
-  const activeTeams = new Set();
-  state.players.forEach(p => {
-    const pState = state.playerState[p.id];
-    if (pState && !pState.lost) {
-      activeTeams.add(p.team);
-    }
-  });
-  return activeTeams.size <= 1;
-}
-
-function advanceSequentialTurns(state) {
-  if (state.turnStyle !== 'sequential') return;
-
-  let roundInProgress = true;
-  while (roundInProgress) {
-    if (checkGameOver(state)) {
-      break;
-    }
-
-    // 1. Check if the current active player is an AI and needs to play
-    const activePlayer = state.players[state.activePlayerIdx];
-    if (activePlayer && activePlayer.type === 'ai' && !state.playerState[activePlayer.id].lost && !activePlayer.endedTurn) {
-      runAITurn(state, activePlayer.id);
-      activePlayer.endedTurn = true;
-    }
-
-    // 2. Check if all active players (both human and AI) have ended their turns
-    const activePlayers = state.players.filter(p => !state.playerState[p.id].lost);
-    const allActiveEnded = activePlayers.every(p => p.endedTurn);
-
-    if (allActiveEnded) {
-      // Roll over round
-      processTurnEnd(state);
-
-      // Reset endedTurn flags for all players for the new round
-      state.players.forEach(p => {
-        p.endedTurn = false;
-      });
-
-      // Set active player back to the first active player (human or AI)
-      const firstActive = state.players.find(p => !state.playerState[p.id].lost);
-      if (firstActive) {
-        state.activePlayerIdx = state.players.indexOf(firstActive);
-      } else {
-        break;
-      }
-    } else {
-      // If current active player has ended their turn, transition to the next player in order
-      const currentActive = state.players[state.activePlayerIdx];
-      if (currentActive && currentActive.endedTurn) {
-        let nextIdx = state.activePlayerIdx;
-        let foundNext = false;
-        for (let i = 0; i < state.players.length; i++) {
-          nextIdx = (nextIdx + 1) % state.players.length;
-          const p = state.players[nextIdx];
-          if (!state.playerState[p.id].lost && !p.endedTurn) {
-            state.activePlayerIdx = nextIdx;
-            foundNext = true;
-            break;
-          }
-        }
-        if (!foundNext) {
-          break;
-        }
-      } else {
-        // Active player is human and hasn't ended their turn. Wait for user input.
-        roundInProgress = false;
-      }
-    }
-  }
-}
+// Helper functions for turn & game resolution are imported from gameState.js
 
 // Endpoint: Process game action securely on server side
 app.post('/api/games/:id/action', validateCSRF, (req, res) => {
@@ -1128,7 +1057,7 @@ app.post('/api/games/:id/action', validateCSRF, (req, res) => {
             logAction(gameState, player.id, 'end_turn', 'Submitted orders / ended turn');
 
             if (gameState.turnStyle === 'sequential') {
-              advanceSequentialTurns(gameState);
+              advanceSequentialTurns(gameState, runAITurn);
             } else {
               const activeHumans = gameState.players.filter(p => p.type === 'human' && !gameState.playerState[p.id].lost);
               const allEnded = activeHumans.every(p => p.endedTurn);

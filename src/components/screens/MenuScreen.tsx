@@ -4,6 +4,7 @@ import { GameMetadata, JoinRequest } from '../../game/gameApi';
 import { UserAccount } from '../../game/auth';
 import { getGameTurnStatus, canCancelEndTurnInGame } from '../../utils/gameHelpers';
 import { copyToClipboard } from '../../utils/clipboard';
+import { isElectronMode } from '../../utils/env';
 
 interface MenuScreenProps {
   currentUser: UserAccount | null;
@@ -340,7 +341,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                       {game.name}
                     </div>
                     {/* Pending join requests badge */}
-                    {pendingReqs.length > 0 && (
+                    {!isElectronMode() && pendingReqs.length > 0 && (
                       <span
                         style={{
                           background: 'var(--accent-cyan)',
@@ -425,26 +426,28 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: '90px' }}>
                   {/* Invite link copy button */}
-                  <button
-                    className="btn-sci-fi"
-                    style={{ padding: '4px 8px', fontSize: '9px' }}
-                    title="Copy invite link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const inviteUrl = `${window.location.origin}${window.location.pathname}?gameId=${game.invite_code || game.id}`;
-                      copyToClipboard(inviteUrl).then((success) => {
-                        if (success) {
-                          showToast('🔗 Invite link copied to clipboard!', 'success', 3000);
-                        } else {
+                  {!isElectronMode() && (
+                    <button
+                      className="btn-sci-fi"
+                      style={{ padding: '4px 8px', fontSize: '9px' }}
+                      title="Copy invite link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const inviteUrl = `${window.location.origin}${window.location.pathname}?gameId=${game.invite_code || game.id}`;
+                        copyToClipboard(inviteUrl).then((success) => {
+                          if (success) {
+                            showToast('🔗 Invite link copied to clipboard!', 'success', 3000);
+                          } else {
+                            window.prompt('Copy invite link manually:', inviteUrl);
+                          }
+                        }).catch(() => {
                           window.prompt('Copy invite link manually:', inviteUrl);
-                        }
-                      }).catch(() => {
-                        window.prompt('Copy invite link manually:', inviteUrl);
-                      });
-                    }}
-                  >
-                    🔗 INVITE
-                  </button>
+                        });
+                      }}
+                    >
+                      🔗 INVITE
+                    </button>
+                  )}
                   {canCancelEndTurnInGame(game, currentUser) && (
                     <button
                       className="btn-sci-fi btn-danger animate-pulse"
@@ -489,7 +492,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
               </div>
 
               {/* JOIN REQUESTS EXPAND PANEL */}
-              {isPanelOpen && pendingReqs.length > 0 && (
+              {!isElectronMode() && isPanelOpen && pendingReqs.length > 0 && (
                 <div style={{
                   background: 'rgba(0,240,255,0.04)',
                   border: '1px solid rgba(0,240,255,0.2)',

@@ -112,7 +112,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const [isSelectingTarget, setIsSelectingTarget] = React.useState(false);
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+    <div style={{ width: '100vw', height: '100dvh', position: 'relative' }}>
       <StarMap
         gameState={gameState}
         activePlayerId={activePlayer?.id || 1}
