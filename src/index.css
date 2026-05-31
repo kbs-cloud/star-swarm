@@ -5,19 +5,19 @@
   --bg-panel-light: rgba(25, 20, 48, 0.9);
   --border-neon: rgba(0, 240, 255, 0.2);
   --border-neon-bright: rgba(0, 240, 255, 0.6);
-  
+
   /* Neon Accent Colors */
   --accent-cyan: #00f0ff;
   --accent-magenta: #ff007f;
   --accent-yellow: #ffaa00;
   --accent-green: #39ff14;
   --accent-neutral: #8ba2b5;
-  
+
   /* Text colors */
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
-  
+
   font-family: 'Outfit', sans-serif;
 }
 
@@ -51,13 +51,16 @@ body {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: rgba(10, 8, 20, 0.5);
 }
+
 ::-webkit-scrollbar-thumb {
   background: rgba(0, 240, 255, 0.2);
   border-radius: 3px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 240, 255, 0.5);
 }
@@ -86,14 +89,17 @@ body {
   color: var(--accent-cyan);
   text-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
 }
+
 .text-neon-magenta {
   color: var(--accent-magenta);
   text-shadow: 0 0 8px rgba(255, 0, 127, 0.5);
 }
+
 .text-neon-yellow {
   color: var(--accent-yellow);
   text-shadow: 0 0 8px rgba(255, 170, 0, 0.5);
 }
+
 .text-neon-green {
   color: var(--accent-green);
   text-shadow: 0 0 8px rgba(57, 255, 20, 0.5);
@@ -116,15 +122,18 @@ body {
   align-items: center;
   gap: 8px;
 }
+
 .btn-sci-fi:hover:not(:disabled) {
   background: rgba(0, 240, 255, 0.15);
   border-color: var(--accent-cyan);
   box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);
   transform: translateY(-1px);
 }
+
 .btn-sci-fi:active:not(:disabled) {
   transform: translateY(1px);
 }
+
 .btn-sci-fi:disabled {
   opacity: 0.3;
   cursor: not-allowed;
@@ -135,6 +144,7 @@ body {
   border-color: rgba(255, 0, 127, 0.3);
   background: rgba(255, 0, 127, 0.06);
 }
+
 .btn-danger:hover:not(:disabled) {
   background: rgba(255, 0, 127, 0.15);
   border-color: var(--accent-magenta);
@@ -149,10 +159,10 @@ body {
   right: 0;
   bottom: 0;
   z-index: 0;
-  background-image: 
-    radial-gradient(white, rgba(255,255,255,.2) 2px, transparent 40px),
-    radial-gradient(white, rgba(255,255,255,.15) 1px, transparent 30px),
-    radial-gradient(white, rgba(255,255,255,.1) 2px, transparent 40px);
+  background-image:
+    radial-gradient(white, rgba(255, 255, 255, .2) 2px, transparent 40px),
+    radial-gradient(white, rgba(255, 255, 255, .15) 1px, transparent 30px),
+    radial-gradient(white, rgba(255, 255, 255, .1) 2px, transparent 40px);
   background-size: 550px 550px, 350px 350px, 250px 250px;
   background-position: 0 0, 40px 60px, 130px 270px;
   opacity: 0.25;
@@ -161,8 +171,13 @@ body {
 }
 
 @keyframes bgScroll {
-  from { background-position: 0 0, 40px 60px, 130px 270px; }
-  to { background-position: 550px 1100px, 390px 760px, 380px 870px; }
+  from {
+    background-position: 0 0, 40px 60px, 130px 270px;
+  }
+
+  to {
+    background-position: 550px 1100px, 390px 760px, 380px 870px;
+  }
 }
 
 /* Monospace fonts for telemetry and counts */
@@ -176,8 +191,14 @@ body {
 }
 
 @keyframes pulse {
-  0% { opacity: 0.6; }
-  100% { opacity: 1; filter: brightness(1.2); }
+  0% {
+    opacity: 0.6;
+  }
+
+  100% {
+    opacity: 1;
+    filter: brightness(1.2);
+  }
 }
 
 /* Hex Grid Coordinates Indicator */
@@ -197,6 +218,7 @@ body {
     opacity: 0;
     transform: translateY(-20px);
   }
+
   100% {
     opacity: 1;
     transform: translateY(0);
@@ -207,6 +229,7 @@ body {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -217,3 +240,38 @@ body {
 }
 
 
+
+.shader-canvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -1;
+}
+
+/* Minimalist floating author notice */
+.author-notice {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 10;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+  transition: color 0.3s ease;
+}
+
+.author-notice span {
+  color: rgba(255, 255, 255, 0.2);
+  text-transform: none;
+  font-size: 10px;
+  display: block;
+  margin-top: 2px;
+}
