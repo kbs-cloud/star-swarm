@@ -1,6 +1,6 @@
 :root {
   /* Sci-fi Palette */
-  --bg-deep: #05030d;
+  --bg-deep: rgba(13, 10, 29, 0.75);
   --bg-panel: rgba(13, 10, 29, 0.75);
   --bg-panel-light: rgba(25, 20, 48, 0.9);
   --border-neon: rgba(0, 240, 255, 0.2);

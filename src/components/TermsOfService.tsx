@@ -7,13 +7,18 @@ interface TermsOfServiceProps {
 export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
   return (
     <div style={{
-      height: '100vh',
-      paddingBottom: '68px',
+      position: 'fixed',
+      background: 'rgba(5, 3, 13, 0.85)',
+      backdropFilter: 'blur(8px)',
       display: 'flex',
-      flexDirection: 'column',
+      justifyContent: 'center',
       alignItems: 'center',
-      zIndex: 1,
-      position: 'relative'
+      zIndex: 1000,
+      height: '100vh',
+      width: '100vw',
+      top: 0,
+      paddingBottom: '68px',
+      flexDirection: 'column',
     }}>
       {/* Header */}
       <div style={{
@@ -22,7 +27,9 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
         display: 'flex',
         alignItems: 'center',
         gap: '16px',
-        flexShrink: 0
+        flexShrink: 0,
+        maxWidth: '800px',
+        flexDirection: 'column'
       }}>
         <button
           className="btn-sci-fi"

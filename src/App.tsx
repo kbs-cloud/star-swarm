@@ -149,7 +149,7 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
   useEffect(() => {
     // Only initialize if we are on a valid screen
     const validScreens = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'];
-    if (!validScreens.includes(screen)) return;
+    //if (!validScreens.includes(screen)) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -227,7 +227,7 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
     };
   }, [screen]); // Re-run if screen changes
 
-  const isVisible = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
+  const isVisible = true || ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
 
   return isVisible ? (
     <div style={{
@@ -259,7 +259,7 @@ export default function App() {
   const [gameSeed, setGameSeed] = useState<string>(() => String(Math.floor(Math.random() * 900000) + 100000));
   const [overrideSightRange, setOverrideSightRange] = useState<boolean>(false);
   const [customSightRange, setCustomSightRange] = useState<number>(6.0);
-
+  const [showTermsPrivacyPopup, setShowTermsPrivacyPopup] = useState<'none' | 'terms' | 'privacy'>('none');
   const [soundMuted, setSoundMuted] = useState<boolean>(() => {
     return localStorage.getItem('starswarm_sound_muted') === 'true';
   });
@@ -2136,25 +2136,27 @@ export default function App() {
       )}
 
       {/* TERMS OF SERVICE SCREEN */}
-      {screen === 'terms' && (
+      {showTermsPrivacyPopup === 'terms' && (
         <>
-          <div className="space-bg" />
-          <TermsOfService onBack={() => setScreen('menu')} />
+          <div className="space-bg" style={{ backgroundColor: 'rgba(0,0,0,0.25)' }} />
+          <TermsOfService onBack={() => { setShowTermsPrivacyPopup('none'); }} />
         </>
       )}
 
       {/* PRIVACY POLICY SCREEN */}
-      {screen === 'privacy' && (
+      {showTermsPrivacyPopup === 'privacy' && (
         <>
-          <div className="space-bg" />
-          <PrivacyPolicy onBack={() => setScreen('menu')} />
+          <div className="space-bg" style={{ backgroundColor: 'rgba(0,0,0,0.25)' }} />
+          <PrivacyPolicy onBack={() => { setShowTermsPrivacyPopup('none'); }} />
         </>
       )}
-
+      <Footer onNavigate={(target) => setShowTermsPrivacyPopup(target as 'terms' | 'privacy')} />
       {/* FOOTER */}
-      {(screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings' || screen === 'terms' || screen === 'privacy') && (
-        <Footer onNavigate={(target) => setScreen(target as any)} />
-      )}
+      {
+        // (screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings' || screen === 'terms' || screen === 'privacy') && (
+        //   <Footer onNavigate={(target) => setScreen(target as any)} />
+        // )
+      }
 
       {/* AUTH MODAL */}
       <AuthModal

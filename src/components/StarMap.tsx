@@ -25,7 +25,7 @@ export const StarMap: React.FC<StarMapProps> = ({
   targetSystemId,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  
+
   // Transform states
   const [zoom, setZoom] = useState<number>(1.0);
   const [panX, setPanX] = useState<number>(50);
@@ -91,9 +91,9 @@ export const StarMap: React.FC<StarMapProps> = ({
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
+
       // Draw background space nebula effect
-      ctx.fillStyle = '#05030d';
+      ctx.fillStyle = '#05030dA0';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Save drawing context
@@ -105,7 +105,7 @@ export const StarMap: React.FC<StarMapProps> = ({
       // 1. Draw Grid Lines
       ctx.strokeStyle = 'rgba(0, 240, 255, 0.04)';
       ctx.lineWidth = 1;
-      
+
       for (let x = 0; x <= mapWidth; x++) {
         ctx.beginPath();
         ctx.moveTo(x * cellSize, 0);
@@ -172,7 +172,7 @@ export const StarMap: React.FC<StarMapProps> = ({
         const ownerColor = gameState.playerState[fleet.owner]?.color || '#8ba2b5';
         const startX = fleet.isRecalling ? fleet.source.x : (gameState.systems.find(s => s.id === fleet.source.id)?.x || fleet.source.x);
         const startY = fleet.isRecalling ? fleet.source.y : (gameState.systems.find(s => s.id === fleet.source.id)?.y || fleet.source.y);
-        
+
         let destX, destY;
         const destSys = gameState.systems.find(s => s.id === fleet.destination.id);
         if (destSys) {
@@ -221,7 +221,7 @@ export const StarMap: React.FC<StarMapProps> = ({
         const isSysVisible = vision.systems.has(sys.id);
         const sysOwner = sys.owner;
         const ownerColor = gameState.playerState[sysOwner]?.color || '#8ba2b5';
-        
+
         // Draw star core glow
         const grad = ctx.createRadialGradient(
           sys.x * cellSize, sys.y * cellSize, 2,
@@ -271,7 +271,7 @@ export const StarMap: React.FC<StarMapProps> = ({
           // If owned by enemy, HIDE ship count details (draw "??") - CRITICAL REQUIREMENT
           const alliedTeam = gameState.playerState[activePlayerId]?.team;
           const systemTeam = sysOwner === 0 ? 0 : gameState.playerState[sysOwner]?.team;
-          
+
           if (sysOwner === 0) {
             const neutralCount = Object.values(sys.ships).reduce((a, b) => a + b, 0);
             ctx.fillStyle = '#64748b';
@@ -292,7 +292,7 @@ export const StarMap: React.FC<StarMapProps> = ({
 
       // 5. Draw Fog of War Shading Overlay
       // We divide the viewport into grid chunks and render shadow on those not in vision coordinates
-      ctx.fillStyle = 'rgba(4, 2, 9, 0.65)';
+      ctx.fillStyle = 'rgba(4, 2, 9, 0.2)';
       for (let x = 0; x < mapWidth; x++) {
         for (let y = 0; y < mapHeight; y++) {
           if (!vision.coordinates.has(`${x},${y}`)) {
@@ -343,7 +343,7 @@ export const StarMap: React.FC<StarMapProps> = ({
 
     if (clickedSys) {
       setSelectedFleetId(null);
-      
+
       // If we already have a system selected, and we Ctrl + click another system, trigger targeting
       if (selectedSystemId && selectedSystemId !== clickedSys.id && e.ctrlKey) {
         onSelectTargetSystem(clickedSys);
@@ -460,11 +460,11 @@ export const StarMap: React.FC<StarMapProps> = ({
     const mouseY = e.clientY - rect.top;
 
     const gridMouse = screenToGrid(mouseX, mouseY);
-    
+
     // Zoom factor
     const factor = e.deltaY < 0 ? 1.15 : 0.85;
     const newZoom = Math.min(3.0, Math.max(0.3, zoom * factor));
-    
+
     // Adjust pan coordinates to center zoom on mouse point
     const newPanX = mouseX - gridMouse.x * cellSize * newZoom;
     const newPanY = mouseY - gridMouse.y * cellSize * newZoom;
@@ -513,7 +513,7 @@ export const StarMap: React.FC<StarMapProps> = ({
         )}
         {activeFleet && (
           <div className="grid-indicator" style={{ color: 'var(--accent-yellow)' }}>
-            LOCKED ON FLEET: {Object.values(activeFleet.ships).reduce((a,b)=>a+b, 0)} ships to {activeFleet.destination.name}
+            LOCKED ON FLEET: {Object.values(activeFleet.ships).reduce((a, b) => a + b, 0)} ships to {activeFleet.destination.name}
           </div>
         )}
       </div>
