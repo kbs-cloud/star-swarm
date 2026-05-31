@@ -82,7 +82,7 @@ export default function App() {
   const [gameSeed, setGameSeed] = useState<string>(() => String(Math.floor(Math.random() * 900000) + 100000));
   const [overrideSightRange, setOverrideSightRange] = useState<boolean>(false);
   const [customSightRange, setCustomSightRange] = useState<number>(6.0);
-  
+
   const [soundMuted, setSoundMuted] = useState<boolean>(() => {
     return localStorage.getItem('starswarm_sound_muted') === 'true';
   });
@@ -98,24 +98,80 @@ export default function App() {
   const soundMutedRef = React.useRef(soundMuted);
   React.useEffect(() => {
     soundMutedRef.current = soundMuted;
+    if (soundMuted) {
+      stopBackgroundMusic();
+    } else {
+      playBackgroundMusic();
+    }
   }, [soundMuted]);
 
   const lastHoveredButtonRef = React.useRef<Element | null>(null);
+
+  const backgroundMusicRef = React.useRef<HTMLAudioElement | null>(null);
+
+  function playBackgroundMusic() {
+    initBackgroundMusic();
+
+    if (!soundMutedRef.current && backgroundMusicRef.current != null) {
+      try {
+        const context = new AudioContext();
+        window.setTimeout(() => {
+          console.log(context.state);
+          if (backgroundMusicRef.current !== null && context.state === 'suspended' && backgroundMusicRef.current.currentTime <= 0) {
+            setSoundMuted(true);
+            localStorage.setItem('starswarm_sound_muted', 'true');
+          } else {
+            if (backgroundMusicRef.current !== null) {
+              backgroundMusicRef.current.play().catch((err) => {
+                console.warn('Background music playback failed:', err);
+              });
+            }
+          }
+        }, 300);
+      } catch (err) {
+        console.warn('Background music permission request failed:', err);
+      }
+    }
+  }
+
+  function stopBackgroundMusic() {
+    if (backgroundMusicRef.current) {
+      backgroundMusicRef.current.pause();
+    }
+  }
+
+  function initBackgroundMusic() {
+    if (backgroundMusicRef.current === null) {
+      try {
+        backgroundMusicRef.current = new Audio('/menu-background-loop.mp3');
+        backgroundMusicRef.current.volume = 0.85;
+        backgroundMusicRef.current.loop = true;
+
+
+      } catch (err) {
+        console.warn('Background music initialization failed:', err);
+      }
+    }
+  }
+
+  React.useEffect(() => {
+    playBackgroundMusic();
+  }, []);
 
   React.useEffect(() => {
     const handleMouseEnter = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target || typeof target.closest !== 'function') return;
-      
+
       const button = target.closest('button, .btn-sci-fi, [role="button"]');
       if (button) {
         if (button === lastHoveredButtonRef.current) {
           return;
         }
         lastHoveredButtonRef.current = button;
-        
+
         if (button.hasAttribute('disabled') || button.classList.contains('disabled')) return;
-        
+
         if (!soundMutedRef.current) {
           try {
             const audio = new Audio('/button-hover.mp3');
@@ -139,7 +195,7 @@ export default function App() {
       document.removeEventListener('mouseenter', handleMouseEnter, true);
     };
   }, []);
-  
+
   // Persistent Database Game States
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [activeGameName, setActiveGameName] = useState<string>('');
@@ -161,7 +217,7 @@ export default function App() {
   ]);
 
   const [gameState, setGameState] = useState<GameState | null>(null);
-  
+
   // Selection states
   const [selectedSystemId, setSelectedSystemId] = useState<number | null>(null);
   const [selectedFleetId, setSelectedFleetId] = useState<string | null>(null);
@@ -372,7 +428,7 @@ export default function App() {
       }, 300);
       return () => clearTimeout(timer);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameSearchQuery, gameSearchStatus, gameStartDate, gameEndDate, gameTurnsFilter, currentUser, screen]);
 
   // Helper to determine if a player is local to this client session
@@ -394,7 +450,7 @@ export default function App() {
   // userOverride: pass the resolved user directly to avoid stale React state closures
   const loadGameFromId = async (id: string, userOverride?: UserAccount | null) => {
     const effectiveUser = userOverride !== undefined ? userOverride : currentUser;
-    
+
     // Optimistically transition to game screen with skeleton grid
     const skeletonState: GameState = {
       gridWidth: gridSize || 60,
@@ -415,7 +471,7 @@ export default function App() {
     isCancelledRef.current = false;
 
     const res = await getGame(id);
-    
+
     if (isCancelledRef.current) return;
     setIsLoadingGame(false);
 
@@ -448,12 +504,12 @@ export default function App() {
       setActiveGameName(gameData.name || '');
       setGameOwnerEmail(gameData.ownerEmail);
       setConnectedPlayers(res.connectedPlayers || []);
-      
+
       // Determine gameMode (skirmish vs hotseat) from players
       const hasMultipleHumans = gameData.gameState.players.filter(p => p.type === 'human').length > 1;
       setGameMode(hasMultipleHumans ? 'hotseat' : 'skirmish');
       setTurnStyle(gameData.gameState.turnStyle || 'simultaneous');
-      
+
       // Update players setup to match
       const setup = gameData.gameState.players.map(p => ({
         id: p.id,
@@ -597,7 +653,7 @@ export default function App() {
       // Check Google OAuth config
       const config = await checkGoogleOAuthConfig();
       setIsGoogleAuthEnabled(config.enabled);
-      
+
       // Check query parameter for gameId
       const params = new URLSearchParams(window.location.search);
       const urlGameId = params.get('gameId');
@@ -616,7 +672,7 @@ export default function App() {
     if (currentUser && pendingJoinGameId) {
       loadGameFromId(pendingJoinGameId, currentUser);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   // Load custom game modes when current user changes
@@ -650,7 +706,7 @@ export default function App() {
         if (res.game.name) {
           setActiveGameName(res.game.name);
         }
-        
+
         const serverState = res.game.gameState;
         setGameState(prev => {
           if (!prev) return serverState;
@@ -658,12 +714,12 @@ export default function App() {
           const isTurnChanged = serverState.turnNumber !== prev.turnNumber || serverState.activePlayerIdx !== prev.activePlayerIdx;
           const activePlayerOnServer = serverState.players[serverState.activePlayerIdx];
           const isRemoteActive = activePlayerOnServer && !isPlayerLocalToClient(activePlayerOnServer);
-          
+
           const isStateDifferent = JSON.stringify(serverState.fleets) !== JSON.stringify(prev.fleets) ||
-                                  JSON.stringify(serverState.playerState) !== JSON.stringify(prev.playerState) ||
-                                  JSON.stringify(serverState.systems.map(s => ({ owner: s.owner, ships: s.ships, queue: s.buildQueue }))) !== 
-                                  JSON.stringify(prev.systems.map(s => ({ owner: s.owner, ships: s.ships, queue: s.buildQueue }))) ||
-                                  JSON.stringify(serverState.players) !== JSON.stringify(prev.players);
+            JSON.stringify(serverState.playerState) !== JSON.stringify(prev.playerState) ||
+            JSON.stringify(serverState.systems.map(s => ({ owner: s.owner, ships: s.ships, queue: s.buildQueue }))) !==
+            JSON.stringify(prev.systems.map(s => ({ owner: s.owner, ships: s.ships, queue: s.buildQueue }))) ||
+            JSON.stringify(serverState.players) !== JSON.stringify(prev.players);
 
           if (isTurnChanged || isRemoteActive || isStateDifferent) {
             return serverState;
@@ -774,7 +830,7 @@ export default function App() {
 
           if (newNotifications.length > 0) {
             setNotifications(prevNotifs => [...prevNotifs, ...newNotifications]);
-            
+
             // Setup auto-dismiss for each new notification after 6 seconds
             newNotifications.forEach(notif => {
               setTimeout(() => {
@@ -787,7 +843,7 @@ export default function App() {
     }
 
     prevGameStateRef.current = gameState;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState, activeGameId, screen]);
 
 
@@ -817,7 +873,7 @@ export default function App() {
     pollJoins();
     const interval = setInterval(pollJoins, 5000);
     return () => { isSubscribed = false; clearInterval(interval); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGameId, screen, currentUser, gameOwnerEmail, guestName]);
 
   // Poll home screen pending join requests for each owned saved game every 8 s
@@ -846,7 +902,7 @@ export default function App() {
     pollAllGames();
     const interval = setInterval(pollAllGames, 8000);
     return () => { isSubscribed = false; clearInterval(interval); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, currentUser, savedGames.length]);
 
   // If the player has a pending join request, poll their status every 3 s
@@ -876,7 +932,7 @@ export default function App() {
     pollStatus();
     const interval = setInterval(pollStatus, 3000);
     return () => { isSubscribed = false; clearInterval(interval); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingJoinGameId, currentUser, guestName]);
 
 
@@ -907,7 +963,7 @@ export default function App() {
     if (playersSetup.length >= 8) return;
     const nextId = playersSetup.length + 1;
     const factionDefaults = FACTION_INFO[nextId] || { name: `Faction ${nextId}`, color: '#ffffff', team: ((nextId - 1) % 4) + 1 };
-    
+
     const newPlayer: PlayerSetup = {
       id: nextId,
       name: `Admiral ${String.fromCharCode(64 + nextId)}`,
@@ -918,7 +974,7 @@ export default function App() {
       assignedEmail: '',
       endedTurn: false
     };
-    
+
     const newSetup = [...playersSetup, newPlayer];
     setPlayersSetup(newSetup);
     applyRecommendations(newSetup.length);
@@ -935,9 +991,9 @@ export default function App() {
         ...p,
         id: newId,
         name: p.name.startsWith('Admiral ') || p.name.includes(' AI') || p.name.includes('You')
-          ? (newId === 1 
-              ? 'Vanguard (You)' 
-              : (p.type === 'ai' ? `${factionDefaults.name.split(' ')[0]} AI` : `Admiral ${String.fromCharCode(64 + newId)}`))
+          ? (newId === 1
+            ? 'Vanguard (You)'
+            : (p.type === 'ai' ? `${factionDefaults.name.split(' ')[0]} AI` : `Admiral ${String.fromCharCode(64 + newId)}`))
           : p.name,
         color: factionDefaults.color
       };
@@ -957,12 +1013,12 @@ export default function App() {
 
   const handleSaveRules = () => {
     if (!editingRules) return;
-    
+
     // Validation
     const errors: string[] = [];
     if (!editingRules.name.trim()) errors.push('Ruleset name cannot be empty.');
     if (Object.keys(editingRules.ships).length === 0) errors.push('At least one ship type must be defined.');
-    
+
     // Check hit chances are valid decimals
     Object.entries(editingRules.ships).forEach(([type, def]) => {
       if (def.hitChance < 0 || def.hitChance > 1) {
@@ -982,7 +1038,7 @@ export default function App() {
     }
 
     setEditorErrors([]);
-    
+
     // Find all custom rules, replace the edited one, or add if new
     const customs = gameModes.filter(m => !m.isDefault && m.id !== editingRules.id);
     const updatedCustoms = [...customs, editingRules];
@@ -1003,7 +1059,7 @@ export default function App() {
       const jsonStr = JSON.stringify(rulesCopy);
       const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
       const exportStr = `SS-RULES-V${rulesCopy.version || 1}-${b64}`;
-      
+
       navigator.clipboard.writeText(exportStr).then(() => {
         setAlertMsg('RULESET PROTOCOL EXPORTED TO CLIPBOARD');
         setTimeout(() => setAlertMsg(null), 3000);
@@ -1074,7 +1130,7 @@ export default function App() {
       if (migratedRules.captureRequiresColonyShip === undefined) migratedRules.captureRequiresColonyShip = true;
       if (migratedRules.startingResources === undefined) migratedRules.startingResources = 60;
       if (migratedRules.starSightRange === undefined) migratedRules.starSightRange = 6.0;
-      
+
       if (!migratedRules.resourcesPerTurn) {
         migratedRules.resourcesPerTurn = { base: 15, randomAdd: 10 };
       }
@@ -1114,7 +1170,7 @@ export default function App() {
     const errors: string[] = [];
     if (!importRulesPreview.name.trim()) errors.push('Ruleset name cannot be empty.');
     if (Object.keys(importRulesPreview.ships).length === 0) errors.push('At least one ship type must be defined.');
-    
+
     Object.entries(importRulesPreview.ships).forEach(([type, def]) => {
       if (def.hitChance < 0 || def.hitChance > 1) {
         errors.push(`Hit chance for ${type} must be between 0.0 and 1.0.`);
@@ -1147,7 +1203,7 @@ export default function App() {
     const newCustoms = [...customs, finalRules];
     saveCustomModes(newCustoms);
     setSelectedModeId(finalRules.id);
-    
+
     setIsImportPreviewOpen(false);
     setImportRulesPreview(null);
     setImportOriginalVersion(null);
@@ -1205,13 +1261,13 @@ export default function App() {
 
     const gameName = `Skirmish Match (${new Date().toLocaleDateString()})`;
     const res = await createGame(gameName, null, setupOptions);
-    
+
     if (isCancelledRef.current) return;
 
     if (res.success && res.gameId) {
       // Fetch the actual initialized game state from the server
       const getRes = await getGame(res.gameId);
-      
+
       if (isCancelledRef.current) return;
 
       if (getRes.success && getRes.game) {
@@ -1226,7 +1282,7 @@ export default function App() {
         window.history.pushState(null, '', `?gameId=${gameData.inviteCode || gameData.id}`);
         setGameState(gameData.gameState);
         setConnectedPlayers(getRes.connectedPlayers || []);
-        
+
         const hasMultipleHumans = gameData.gameState.players.filter(p => p.type === 'human').length > 1;
         setGameMode(hasMultipleHumans ? 'hotseat' : 'skirmish');
         setTurnStyle(gameData.gameState.turnStyle || 'simultaneous');
@@ -1303,7 +1359,7 @@ export default function App() {
       setCurrentUser(res.user);
       setIsAuthModalOpen(false);
       clearAuthInputs();
-      
+
       const params = new URLSearchParams(window.location.search);
       const urlGameId = params.get('gameId');
       if (urlGameId) {
@@ -1334,17 +1390,17 @@ export default function App() {
   const recordStats = (state: GameState) => {
     const activeSession = getCurrentUser();
     if (!activeSession) return;
-    
+
     const activeFactions = state.players.filter(p => !state.playerState[p.id].lost);
     if (activeFactions.length === 0) {
       recordGameStats(activeSession.email, false);
       setCurrentUser(getCurrentUser());
       return;
     }
-    
+
     const winningTeam = activeFactions[0].team;
     let didUserWin = false;
-    
+
     if (gameMode === 'skirmish') {
       const humanPlayer = state.players.find(p => p.id === 1);
       if (humanPlayer && humanPlayer.team === winningTeam && !state.playerState[1].lost) {
@@ -1358,7 +1414,7 @@ export default function App() {
         didUserWin = true;
       }
     }
-    
+
     recordGameStats(activeSession.email, didUserWin);
     setCurrentUser(getCurrentUser());
   };
@@ -1366,33 +1422,33 @@ export default function App() {
   // Helper to determine the active player for the client rendering context
   const getClientActivePlayer = (state: GameState | null): Player | null => {
     if (!state) return null;
-    
+
     // In sequential mode, always follow the global active player
     if (state.turnStyle === 'sequential') {
       return state.players[state.activePlayerIdx] || null;
     }
-    
+
     // In simultaneous mode, find a local human player who hasn't ended their turn yet
-    const localPending = state.players.filter(p => 
-      p.type === 'human' && 
-      !state.playerState[p.id]?.lost && 
-      !p.endedTurn && 
+    const localPending = state.players.filter(p =>
+      p.type === 'human' &&
+      !state.playerState[p.id]?.lost &&
+      !p.endedTurn &&
       isPlayerLocalToClient(p)
     );
-    
+
     if (localPending.length > 0) {
       return localPending[0];
     }
-    
+
     // If all local human players have ended their turn, fall back to the first local human player (even if ended)
-    const localAll = state.players.filter(p => 
-      p.type === 'human' && 
+    const localAll = state.players.filter(p =>
+      p.type === 'human' &&
       isPlayerLocalToClient(p)
     );
     if (localAll.length > 0) {
       return localAll[0];
     }
-    
+
     // Fallback to the global active player
     return state.players[state.activePlayerIdx] || null;
   };
@@ -1418,7 +1474,7 @@ export default function App() {
         }
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, gameState, activePlayer, activeGameId, selectedSystemId]);
 
   // Center on home planet when a game loads in
@@ -1434,7 +1490,7 @@ export default function App() {
     } else if (screen !== 'game') {
       lastLoadedGameIdRef.current = null;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, gameState, activePlayer, activeGameId]);
 
   if (!gameState && screen === 'game') return null;
@@ -1561,7 +1617,7 @@ export default function App() {
   // Cycle Turn to next Player
   const handleEndTurn = async () => {
     if (!gameState || !activePlayer || !activeGameId) return;
-    
+
     // Clear selection UI (only in hotseat mode with multiple local human players to prevent screen-peeping)
     const localHumansCount = gameState.players.filter(
       p => p.type === 'human' && !gameState.playerState[p.id]?.lost && isPlayerLocalToClient(p)
