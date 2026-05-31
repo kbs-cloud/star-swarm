@@ -11,6 +11,9 @@ interface StarMapProps {
   onSelectTargetSystem: (sys: StarSystem) => void;
   centerOnCoords: { x: number; y: number; trigger: number } | null;
   targetSystemId: number | null;
+  isMobile: boolean;
+  isSelectingTarget: boolean;
+  setIsSelectingTarget: (v: boolean) => void;
 }
 
 export const StarMap: React.FC<StarMapProps> = ({
@@ -23,6 +26,9 @@ export const StarMap: React.FC<StarMapProps> = ({
   onSelectTargetSystem,
   centerOnCoords,
   targetSystemId,
+  isMobile,
+  isSelectingTarget,
+  setIsSelectingTarget,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -32,11 +38,15 @@ export const StarMap: React.FC<StarMapProps> = ({
   const [panY, setPanY] = useState<number>(50);
   const [hoveredSysId, setHoveredSysId] = useState<number | null>(null);
   const [hoveredFleetId, setHoveredFleetId] = useState<string | null>(null);
+  const [showZoomMenu, setShowZoomMenu] = useState<boolean>(false);
 
   // Mouse drag states
   const isDragging = useRef<boolean>(false);
   const dragStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragMoved = useRef<boolean>(false);
+  const touchStartDist = useRef<number>(0);
+  const touchStartZoom = useRef<number>(1.0);
+  const touchStartMidpoint = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Calculate Active Vision
   const vision = computeVision(gameState, activePlayerId);
@@ -314,19 +324,7 @@ export const StarMap: React.FC<StarMapProps> = ({
     };
   }, [gameState, activePlayerId, zoom, panX, panY, selectedSystemId, selectedFleetId, hoveredSysId, hoveredFleetId, vision, targetSystemId]);
 
-  // Click handler: Selects star systems or fleets on the canvas
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (dragMoved.current) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-
-
-
+  const handleSelectionAtCoords = (clickX: number, clickY: number, isCtrl: boolean) => {
     // 1. Check if clicked a star system (within a radius of 15px)
     let clickedSys: StarSystem | null = null;
     const selectThreshold = 15;
@@ -344,8 +342,8 @@ export const StarMap: React.FC<StarMapProps> = ({
     if (clickedSys) {
       setSelectedFleetId(null);
 
-      // If we already have a system selected, and we Ctrl + click another system, trigger targeting
-      if (selectedSystemId && selectedSystemId !== clickedSys.id && e.ctrlKey) {
+      // If we already have a system selected, and we Ctrl + click another system (or targeting mode is active), trigger targeting
+      if (selectedSystemId && selectedSystemId !== clickedSys.id && (isCtrl || isSelectingTarget)) {
         onSelectTargetSystem(clickedSys);
       } else {
         setSelectedSystemId(clickedSys.id);
@@ -353,7 +351,7 @@ export const StarMap: React.FC<StarMapProps> = ({
       return;
     }
 
-    // 2. Check if clicked a fleet (within 10px screen distance)
+    // 2. Check if clicked a fleet (within 15px screen distance)
     let clickedFleet: Fleet | null = null;
     const visibleFleets = gameState.fleets.filter(f => vision.fleets.has(f.id));
 
@@ -376,6 +374,20 @@ export const StarMap: React.FC<StarMapProps> = ({
     // Clicked empty space: deselect everything
     setSelectedSystemId(null);
     setSelectedFleetId(null);
+  };
+
+  // Click handler: Selects star systems or fleets on the canvas
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (dragMoved.current) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    handleSelectionAtCoords(clickX, clickY, e.ctrlKey);
   };
 
   // Track hover coordinate telemetry
@@ -449,6 +461,87 @@ export const StarMap: React.FC<StarMapProps> = ({
     isDragging.current = false;
   };
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+
+    if (e.touches.length === 1) {
+      // Single touch drag to pan
+      isDragging.current = true;
+      dragMoved.current = false;
+      const touch = e.touches[0];
+      dragStart.current = {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top,
+      };
+      touchStartDist.current = 0;
+    } else if (e.touches.length === 2) {
+      // Dual touch pinch to zoom
+      isDragging.current = false;
+      dragMoved.current = false;
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const dist = Math.sqrt((touch1.clientX - touch2.clientX) ** 2 + (touch1.clientY - touch2.clientY) ** 2);
+      touchStartDist.current = dist;
+      touchStartZoom.current = zoom;
+      
+      const midX = (touch1.clientX + touch2.clientX) / 2 - rect.left;
+      const midY = (touch1.clientY + touch2.clientY) / 2 - rect.top;
+      touchStartMidpoint.current = { x: midX, y: midY };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+
+    if (e.touches.length === 1 && isDragging.current) {
+      // Panning
+      const touch = e.touches[0];
+      const mx = touch.clientX - rect.left;
+      const my = touch.clientY - rect.top;
+      const dx = mx - dragStart.current.x;
+      const dy = my - dragStart.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        dragMoved.current = true;
+      }
+      if (dragMoved.current) {
+        setPanX(px => px + dx);
+        setPanY(py => py + dy);
+        dragStart.current = { x: mx, y: my };
+      }
+    } else if (e.touches.length === 2 && touchStartDist.current > 0) {
+      // Pinch to Zoom
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const dist = Math.sqrt((touch1.clientX - touch2.clientX) ** 2 + (touch1.clientY - touch2.clientY) ** 2);
+      const factor = dist / touchStartDist.current;
+      const newZoom = Math.min(3.0, Math.max(0.3, touchStartZoom.current * factor));
+
+      const midX = touchStartMidpoint.current.x;
+      const midY = touchStartMidpoint.current.y;
+      const gridMid = screenToGrid(midX, midY);
+
+      const newPanX = midX - gridMid.x * cellSize * newZoom;
+      const newPanY = midY - gridMid.y * cellSize * newZoom;
+
+      setZoom(newZoom);
+      setPanX(newPanX);
+      setPanY(newPanY);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (isDragging.current && !dragMoved.current) {
+      // Tap selection
+      handleSelectionAtCoords(dragStart.current.x, dragStart.current.y, false);
+    }
+    isDragging.current = false;
+    touchStartDist.current = 0;
+  };
+
   // Zoom with scroll wheel centered at current mouse cursor
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -480,6 +573,37 @@ export const StarMap: React.FC<StarMapProps> = ({
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+      {isSelectingTarget && (
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(5, 3, 13, 0.9)',
+          border: '1px solid var(--accent-green)',
+          boxShadow: '0 0 15px rgba(57, 255, 20, 0.3)',
+          padding: '10px 20px',
+          borderRadius: '8px',
+          color: 'var(--accent-green)',
+          fontFamily: 'Orbitron',
+          fontSize: '13px',
+          letterSpacing: '1px',
+          zIndex: 100,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          pointerEvents: 'auto'
+        }}>
+          <span>🎯 TARGETING MODE: TAP DESTINATION SYSTEM</span>
+          <button 
+            className="btn-sci-fi btn-danger" 
+            style={{ padding: '3px 8px', fontSize: '10px' }}
+            onClick={() => setIsSelectingTarget(false)}
+          >
+            CANCEL
+          </button>
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         style={{ width: '100%', height: '100%', display: 'block', cursor: isDragging.current ? 'grabbing' : 'grab' }}
@@ -488,47 +612,96 @@ export const StarMap: React.FC<StarMapProps> = ({
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       />
 
       {/* Telemetry panel (Zoom / Pan Coordinates) */}
       <div style={{
         position: 'absolute',
-        bottom: '20px',
+        bottom: isMobile ? (window.innerHeight <= 480 ? '48px' : '65px') : '20px',
         left: '20px',
         display: 'flex',
         flexDirection: 'column',
         gap: '6px',
-        pointerEvents: 'none'
+        pointerEvents: 'none',
+        zIndex: 90
       }}>
-        <div className="grid-indicator">
+        <div className="grid-indicator" style={{ fontSize: window.innerHeight <= 480 ? '9px' : '11px', padding: window.innerHeight <= 480 ? '2px 6px' : '4px 8px' }}>
           TELEMETRY RANGE: {mapWidth}x{mapHeight} LY
         </div>
-        <div className="grid-indicator">
+        <div className="grid-indicator" style={{ fontSize: window.innerHeight <= 480 ? '9px' : '11px', padding: window.innerHeight <= 480 ? '2px 6px' : '4px 8px' }}>
           ZOOM: {Math.round(zoom * 100)}%
         </div>
         {activeSystem && (
-          <div className="grid-indicator" style={{ color: 'var(--accent-magenta)' }}>
+          <div className="grid-indicator" style={{ color: 'var(--accent-magenta)', fontSize: window.innerHeight <= 480 ? '9px' : '11px', padding: window.innerHeight <= 480 ? '2px 6px' : '4px 8px' }}>
             LOCKED ON: {activeSystem.name} ({activeSystem.x}, {activeSystem.y})
           </div>
         )}
         {activeFleet && (
-          <div className="grid-indicator" style={{ color: 'var(--accent-yellow)' }}>
+          <div className="grid-indicator" style={{ color: 'var(--accent-yellow)', fontSize: window.innerHeight <= 480 ? '9px' : '11px', padding: window.innerHeight <= 480 ? '2px 6px' : '4px 8px' }}>
             LOCKED ON FLEET: {Object.values(activeFleet.ships).reduce((a, b) => a + b, 0)} ships to {activeFleet.destination.name}
           </div>
         )}
       </div>
 
-      <div style={{
-        position: 'absolute',
-        bottom: '20px',
-        right: '20px',
-        display: 'flex',
-        gap: '8px',
-        padding: '6px'
-      }} className="glass-panel">
-        <button className="btn-sci-fi" onClick={handleZoomIn} style={{ padding: '6px 12px', fontSize: '12px' }}>+</button>
-        <button className="btn-sci-fi" onClick={handleZoomOut} style={{ padding: '6px 12px', fontSize: '12px' }}>-</button>
-        <button className="btn-sci-fi" onClick={handleResetView} style={{ padding: '6px 12px', fontSize: '12px' }}>RESET</button>
+      {/* Floating Zoom Controls Trigger and Popout Panel */}
+      <div 
+        style={{
+          position: 'absolute',
+          bottom: isMobile ? (window.innerHeight <= 480 ? '48px' : '65px') : '20px',
+          right: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '8px',
+          zIndex: 150
+        }}
+        onMouseEnter={() => !isMobile && setShowZoomMenu(true)}
+        onMouseLeave={() => !isMobile && setShowZoomMenu(false)}
+      >
+        {showZoomMenu && (
+          <div 
+            style={{
+              display: 'flex',
+              gap: '6px',
+              padding: '6px',
+              background: 'rgba(5, 3, 13, 0.9)',
+              border: '1px solid rgba(0, 240, 255, 0.3)',
+              borderRadius: '6px',
+              boxShadow: '0 0 15px rgba(0, 240, 255, 0.2)',
+              pointerEvents: 'auto'
+            }}
+            className="animate-fade-in"
+          >
+            <button className="btn-sci-fi" onClick={handleZoomIn} style={{ padding: '6px 12px', fontSize: '12px' }} title="Zoom In">+</button>
+            <button className="btn-sci-fi" onClick={handleZoomOut} style={{ padding: '6px 12px', fontSize: '12px' }} title="Zoom Out">-</button>
+            <button className="btn-sci-fi" onClick={handleResetView} style={{ padding: '6px 12px', fontSize: '11px' }} title="Reset Zoom">RESET</button>
+          </div>
+        )}
+        <button
+          className="btn-sci-fi"
+          onClick={() => setShowZoomMenu(!showZoomMenu)}
+          style={{
+            width: '36px',
+            height: '36px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '16px',
+            padding: 0,
+            borderRadius: '50%',
+            background: showZoomMenu ? 'rgba(0, 240, 255, 0.2)' : 'rgba(5, 3, 13, 0.7)',
+            border: '1px solid rgba(0, 240, 255, 0.4)',
+            boxShadow: '0 0 10px rgba(0, 240, 255, 0.15)',
+            pointerEvents: 'auto',
+            cursor: 'pointer'
+          }}
+          title="Map Navigation / Zoom Controls"
+        >
+          🔍
+        </button>
       </div>
     </div>
   );

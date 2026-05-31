@@ -51,6 +51,10 @@ interface GameScreenProps {
   loadGameFromId: (gameId: string) => void;
   showToast: (msg: string, type?: 'success' | 'warning' | 'info', duration?: number) => void;
   showError: (msg: string) => void;
+  compactMode: boolean;
+  isMobile: boolean;
+  activeMobileTab: 'map' | 'empire' | 'tactics';
+  setActiveMobileTab: (tab: 'map' | 'empire' | 'tactics') => void;
 }
 
 export const GameScreen: React.FC<GameScreenProps> = ({
@@ -99,8 +103,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   rejectJoinRequest,
   loadGameFromId,
   showToast,
-  showError
+  showError,
+  compactMode,
+  isMobile,
+  activeMobileTab,
+  setActiveMobileTab
 }) => {
+  const [isSelectingTarget, setIsSelectingTarget] = React.useState(false);
+
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       <StarMap
@@ -110,9 +120,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         setSelectedSystemId={setSelectedSystemId}
         selectedFleetId={selectedFleetId}
         setSelectedFleetId={setSelectedFleetId}
-        onSelectTargetSystem={onSelectTargetSystem}
+        onSelectTargetSystem={(sys) => {
+          onSelectTargetSystem(sys);
+          setIsSelectingTarget(false);
+        }}
         centerOnCoords={centerOnCoords}
         targetSystemId={targetSystem?.id || null}
+        isMobile={isMobile}
+        isSelectingTarget={isSelectingTarget}
+        setIsSelectingTarget={setIsSelectingTarget}
       />
       {!isLoadingGame ? (
         <>
@@ -154,6 +170,12 @@ export const GameScreen: React.FC<GameScreenProps> = ({
             onAssignPlayerEmail={onAssignPlayerEmail}
             soundMuted={soundMuted}
             onToggleSoundMuted={onToggleSoundMuted}
+            compactMode={compactMode}
+            isMobile={isMobile}
+            activeMobileTab={activeMobileTab}
+            setActiveMobileTab={setActiveMobileTab}
+            isSelectingTarget={isSelectingTarget}
+            setIsSelectingTarget={setIsSelectingTarget}
           />
 
           {/* IN-GAME JOIN REQUEST PANEL (host only) */}
@@ -167,8 +189,18 @@ export const GameScreen: React.FC<GameScreenProps> = ({
             const reqs = homePendingRequests[activeGameId] || [];
             const isPanelOpen = joinPanelGameId === activeGameId;
             const freeSlots = gameState.players.filter(p => p.type === 'human' && !p.assignedEmail).map(p => ({ id: p.id, name: p.name }));
-            return (
-              <div style={{
+             return (
+              <div style={isMobile ? {
+                position: 'absolute',
+                top: '55px',
+                right: '10px',
+                zIndex: 50,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                pointerEvents: 'auto',
+                maxWidth: '280px'
+              } : {
                 position: 'absolute',
                 top: '90px',
                 right: '420px',

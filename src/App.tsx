@@ -69,6 +69,7 @@ import { DeleteGameModal } from './components/modals/DeleteGameModal';
 import { ImportRulesModal } from './components/modals/ImportRulesModal';
 import { RulesEditorModal } from './components/modals/RulesEditorModal';
 import { ImportPreviewModal } from './components/modals/ImportPreviewModal';
+import { AboutModal } from './components/modals/AboutModal';
 
 type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings' | 'terms' | 'privacy';
 const StarNestBackground = ({ screen }: { screen: string }) => {
@@ -203,11 +204,16 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
 
     // --- Animation Loop ---
     const render = (time: number) => {
-      // Handle resize
-      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        gl.viewport(0, 0, canvas.width, canvas.height);
+      // Handle resize using parent element dimensions so it fits height: calc(100vh - 50px)
+      const parent = canvas.parentElement;
+      if (parent) {
+        const width = parent.clientWidth;
+        const height = parent.clientHeight;
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+          gl.viewport(0, 0, canvas.width, canvas.height);
+        }
       }
 
       gl.uniform1f(timeLoc, time * 0.001);
@@ -227,7 +233,7 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
     };
   }, [screen]); // Re-run if screen changes
 
-  const isVisible = true || ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
+  const isVisible = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
 
   return isVisible ? (
     <div style={{
@@ -235,7 +241,7 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
       top: 0,
       left: 0,
       width: "100vw",
-      height: "100vh",
+      height: "calc(100vh - 50px)", // End before footer
       zIndex: -1,        // Ensure it stays behind
       pointerEvents: "none" // Allows mouse clicks to pass through to buttons
     }}>
@@ -243,6 +249,16 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
         ref={canvasRef}
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
+      {/* Fade to black on the bottom portion of the canvas */}
+      <div style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '80px',
+        background: 'linear-gradient(to bottom, transparent, #000000)',
+        pointerEvents: 'none'
+      }} />
       <div className="author-notice" style={{ pointerEvents: "auto" }}>
         Star Nest by Pablo Roman Andrioli
       </div>
@@ -446,6 +462,7 @@ export default function App() {
   // Authentication State
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(getCurrentUser());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [authTab, setAuthTab] = useState<'signin' | 'register'>('signin');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -456,6 +473,27 @@ export default function App() {
   const [isGoogleAuthEnabled, setIsGoogleAuthEnabled] = useState(false);
 
   const [settingsDisplayName, setSettingsDisplayName] = useState<string>('');
+  const [compactMode, setCompactMode] = useState<boolean>(() => {
+    return localStorage.getItem('starswarm_compact_mode') === 'true';
+  });
+  const [settingsCompactMode, setSettingsCompactMode] = useState<boolean>(compactMode);
+  const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 768 || window.innerHeight <= 480);
+  const [activeMobileTab, setActiveMobileTab] = useState<'map' | 'empire' | 'tactics'>('map');
+
+  // Sync settingsCompactMode when settings screen opens or compactMode changes
+  React.useEffect(() => {
+    setSettingsCompactMode(compactMode);
+  }, [compactMode, screen]);
+
+  // Window resize listener
+  React.useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768 || window.innerHeight <= 480);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [settingsNewPassword, setSettingsNewPassword] = useState<string>('');
   const [settingsConfirmPassword, setSettingsConfirmPassword] = useState<string>('');
   const [passwordStatusMessage, setPasswordStatusMessage] = useState<string | null>(null);
@@ -748,6 +786,8 @@ export default function App() {
   // Helper: Save display name settings globally
   const handleSaveSettings = async () => {
     localStorage.setItem('starswarm_display_name', settingsDisplayName);
+    localStorage.setItem('starswarm_compact_mode', settingsCompactMode ? 'true' : 'false');
+    setCompactMode(settingsCompactMode);
     if (currentUser) {
       const res = await updateSettings(settingsDisplayName);
       if (res.success) {
@@ -1922,6 +1962,7 @@ export default function App() {
           }}
           onLogout={handleLogout}
           onNavigateSettings={() => setScreen('settings')}
+          compactMode={compactMode || isMobile}
         />
       )}
 
@@ -1990,6 +2031,7 @@ export default function App() {
             setAlertMsg(msg);
             setTimeout(() => setAlertMsg(null), 5000);
           }}
+          compactMode={compactMode || isMobile}
         />
       )}
 
@@ -2082,6 +2124,10 @@ export default function App() {
             setAlertMsg(msg);
             setTimeout(() => setAlertMsg(null), 5000);
           }}
+          compactMode={compactMode || isMobile}
+          isMobile={isMobile}
+          activeMobileTab={activeMobileTab}
+          setActiveMobileTab={setActiveMobileTab}
         />
       )}
 
@@ -2132,31 +2178,58 @@ export default function App() {
           onShowToast={showToast}
           onSetCurrentUser={setCurrentUser}
           onNavigateMenu={() => setScreen('menu')}
+          settingsCompactMode={settingsCompactMode}
+          setSettingsCompactMode={setSettingsCompactMode}
+          isMobile={isMobile}
         />
       )}
 
       {/* TERMS OF SERVICE SCREEN */}
-      {showTermsPrivacyPopup === 'terms' && (
+      {(showTermsPrivacyPopup === 'terms' || screen === 'terms') && (
         <>
           <div className="space-bg" style={{ backgroundColor: 'rgba(0,0,0,0.25)' }} />
-          <TermsOfService onBack={() => { setShowTermsPrivacyPopup('none'); }} />
+          <TermsOfService onBack={() => {
+            if (screen === 'terms') {
+              setScreen('menu');
+            } else {
+              setShowTermsPrivacyPopup('none');
+            }
+          }} />
         </>
       )}
 
       {/* PRIVACY POLICY SCREEN */}
-      {showTermsPrivacyPopup === 'privacy' && (
+      {(showTermsPrivacyPopup === 'privacy' || screen === 'privacy') && (
         <>
           <div className="space-bg" style={{ backgroundColor: 'rgba(0,0,0,0.25)' }} />
-          <PrivacyPolicy onBack={() => { setShowTermsPrivacyPopup('none'); }} />
+          <PrivacyPolicy onBack={() => {
+            if (screen === 'privacy') {
+              setScreen('menu');
+            } else {
+              setShowTermsPrivacyPopup('none');
+            }
+          }} />
         </>
       )}
-      <Footer onNavigate={(target) => setShowTermsPrivacyPopup(target as 'terms' | 'privacy')} />
+
       {/* FOOTER */}
       {
-        // (screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings' || screen === 'terms' || screen === 'privacy') && (
-        //   <Footer onNavigate={(target) => setScreen(target as any)} />
-        // )
+        (screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings') && (
+          <Footer onNavigate={(target) => {
+            if (target === 'about') {
+              setIsAboutModalOpen(true);
+            } else {
+              setScreen(target as any);
+            }
+          }} />
+        )
       }
+
+      {/* ABOUT MODAL */}
+      <AboutModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
+      />
 
       {/* AUTH MODAL */}
       <AuthModal

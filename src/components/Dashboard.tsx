@@ -32,6 +32,12 @@ interface DashboardProps {
   onRenameGame: (newName: string) => void;
   soundMuted: boolean;
   onToggleSoundMuted: () => void;
+  compactMode: boolean;
+  isMobile: boolean;
+  activeMobileTab: 'map' | 'empire' | 'tactics';
+  setActiveMobileTab: (tab: 'map' | 'empire' | 'tactics') => void;
+  isSelectingTarget: boolean;
+  setIsSelectingTarget: (v: boolean) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -65,11 +71,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onRenameGame,
   soundMuted,
   onToggleSoundMuted,
+  compactMode,
+  isMobile,
+  activeMobileTab,
+  setActiveMobileTab,
+  isSelectingTarget,
+  setIsSelectingTarget,
 }) => {
   const activePlayer = gameState.playerState[activePlayerId];
   const selectedSystem = gameState.systems.find(s => s.id === selectedSystemId) || null;
   const selectedFleet = gameState.fleets.find(f => f.id === selectedFleetId) || null;
   const activeRules = gameState.rules || NORMAL_RULES;
+
+  const getShipIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'scout': return '🛰️';
+      case 'fighter': return '🛸';
+      case 'corvette': return '🚀';
+      case 'cruiser': return '🚢';
+      case 'dreadnought': return '🔱';
+      default: return '🛸';
+    }
+  };
 
   const activePlayerSlot = gameState.players.find(p => p.id === activePlayerId) || gameState.players[gameState.activePlayerIdx];
   const isMyTurn = activePlayerSlot && isPlayerLocalToClient(activePlayerSlot) && !activePlayerSlot.endedTurn;
@@ -382,11 +405,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
     }
   });
-
   return (
-    <div style={{ width: '100%', height: '100%', pointerEvents: 'none', position: 'absolute', top: 0, left: 0, zIndex: 10 }}>
+    <div style={{
+      width: '100%',
+      height: '100%',
+      pointerEvents: (isMobile && activeMobileTab !== 'map') ? 'auto' : 'none',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      zIndex: 10
+    }}>
       {/* 1. TOP BAR */}
-      <div style={{
+      <div style={isMobile ? {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: window.innerHeight <= 480 ? '4px 10px' : '8px 12px',
+        pointerEvents: 'auto',
+        borderRadius: 0,
+        borderLeft: 'none',
+        borderRight: 'none',
+        borderTop: 'none',
+        height: window.innerHeight <= 480 ? '38px' : '50px'
+      } : {
         position: 'absolute',
         top: '20px',
         left: '20px',
@@ -397,306 +442,374 @@ export const Dashboard: React.FC<DashboardProps> = ({
         padding: '12px 20px',
         pointerEvents: 'auto'
       }} className="glass-panel glass-panel-neon-cyan">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          {/* MY FACTION IDENTITY — always shows who THIS logged-in user is */}
-          {(() => {
-            // Check if active player is local first (e.g. local hotseat/sequential turn), then try email match, then fall back to host's local flag
-            const myPlayer = (activePlayerSlot && isPlayerLocalToClient(activePlayerSlot))
-              ? activePlayerSlot
-              : (gameState.players.find(p => p.assignedEmail === currentUserEmail)
-                 || (gameOwnerEmail === currentUserEmail ? gameState.players.find(p => p.isLocal) : undefined));
-            const myState = myPlayer ? gameState.playerState[myPlayer.id] : null;
-            const dotColor = myPlayer?.color || myState?.color || '#888';
-            return (
-              <div>
-                <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '2px' }}>
-                  COMMANDER
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {myPlayer ? (
-                    <>
-                      <span 
-                        onClick={() => handleCenterOnHome(myPlayer.id)}
-                        title="Center on Home Planet"
-                        style={{
-                          width: '12px',
-                          height: '12px',
-                          borderRadius: '50%',
-                          background: dotColor,
-                          display: 'inline-block',
-                          boxShadow: `0 0 8px ${dotColor}`,
-                          cursor: 'pointer',
-                          transition: 'transform 0.15s ease, box-shadow 0.15s ease'
-                        }}
-                        onMouseOver={(e) => {
-                          e.currentTarget.style.transform = 'scale(1.3)';
-                          e.currentTarget.style.boxShadow = `0 0 12px 3px ${dotColor}`;
-                        }}
-                        onMouseOut={(e) => {
-                          e.currentTarget.style.transform = 'scale(1)';
-                          e.currentTarget.style.boxShadow = `0 0 8px ${dotColor}`;
-                        }}
-                      />
-                      <span style={{ color: 'white' }}>{myPlayer.name}</span>
-                      {myState && !myState.lost && activeRules.enableCredits && (
-                        <span style={{ fontSize: '12px', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono', marginLeft: '4px' }}>
-                          {myState.resources} CR
-                        </span>
-                      )}
-                      {myState?.lost && (
-                        <span style={{ fontSize: '10px', color: 'var(--accent-magenta)', fontFamily: 'Share Tech Mono' }}>[ELIMINATED]</span>
-                      )}
-                    </>
-                  ) : (
-                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Observer</span>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.15)' }} />
-
-          {/* ACTIVE FACTION — whose turn it currently is */}
-          <div>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '2px' }}>
-              {isMyTurn ? '▶ YOUR TURN' : 'ACTIVE FACTION'}
-            </div>
-            <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {isMobile ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: window.innerHeight <= 480 ? '5px' : '8px' }}>
+              <span style={{ fontSize: window.innerHeight <= 480 ? '10px' : '11px', color: 'var(--text-primary)', fontWeight: 'bold' }}>T#{gameState.turnNumber}</span>
               <span 
                 onClick={() => handleCenterOnHome(activePlayer.id)}
                 title={`Center on ${activePlayer.name}'s Home Planet`}
                 style={{
-                  width: '12px',
-                  height: '12px',
+                  width: window.innerHeight <= 480 ? '8px' : '10px',
+                  height: window.innerHeight <= 480 ? '8px' : '10px',
                   borderRadius: '50%',
                   background: activePlayer.color || '#ffffff',
                   display: 'inline-block',
-                  boxShadow: `0 0 8px ${activePlayer.color || '#ffffff'}`,
-                  cursor: 'pointer',
-                  transition: 'transform 0.15s ease, box-shadow 0.15s ease'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.transform = 'scale(1.3)';
-                  e.currentTarget.style.boxShadow = `0 0 12px 3px ${activePlayer.color || '#ffffff'}`;
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.transform = 'scale(1)';
-                  e.currentTarget.style.boxShadow = `0 0 8px ${activePlayer.color || '#ffffff'}`;
+                  boxShadow: `0 0 6px ${activePlayer.color || '#ffffff'}`,
+                  cursor: 'pointer'
                 }}
               />
-              <span style={{ color: isMyTurn ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
+              <span style={{ fontSize: window.innerHeight <= 480 ? '11px' : '12px', color: isMyTurn ? 'var(--accent-green)' : 'var(--text-secondary)', maxWidth: window.innerHeight <= 480 ? '70px' : '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {activePlayer.name}
               </span>
+              {activeRules.enableCredits && isMyTurn && (
+                <span style={{ fontSize: window.innerHeight <= 480 ? '10px' : '11px', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono' }}>
+                  {gameState.playerState[activePlayerId]?.resources} CR
+                </span>
+              )}
+            </div>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: window.innerHeight <= 480 ? '4px' : '6px' }}>
+              <button 
+                className="btn-sci-fi" 
+                onClick={onToggleSoundMuted} 
+                style={{ padding: window.innerHeight <= 480 ? '3px 6px' : '6px 8px', fontSize: window.innerHeight <= 480 ? '10px' : '11px' }}
+                title={soundMuted ? "Unmute Sound" : "Mute Sound"}
+              >
+                {soundMuted ? '🔇' : '🔊'}
+              </button>
+              <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: window.innerHeight <= 480 ? '3px 8px' : '6px 10px', fontSize: window.innerHeight <= 480 ? '10px' : '11px', fontWeight: 'bold' }}>
+                HOME
+              </button>
+              <button
+                className={`btn-sci-fi ${isMyTurn && !(activePlayerSlot && activePlayerSlot.endedTurn) ? 'pulse-light' : ''}`}
+                onClick={onEndTurn}
+                style={{ padding: window.innerHeight <= 480 ? '3px 10px' : '6px 12px', fontSize: window.innerHeight <= 480 ? '10px' : '11px', fontWeight: 'bold' }}
+                disabled={!isMyTurn || !!(activePlayerSlot && activePlayerSlot.endedTurn)}
+              >
+                END
+              </button>
             </div>
           </div>
-          
-          {activeRules.enableUpgrades && isMyTurn && (
-            <>
-              <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+              {/* MY FACTION IDENTITY — always shows who THIS logged-in user is */}
+              {(() => {
+                // Check if active player is local first (e.g. local hotseat/sequential turn), then try email match, then fall back to host's local flag
+                const myPlayer = (activePlayerSlot && isPlayerLocalToClient(activePlayerSlot))
+                  ? activePlayerSlot
+                  : (gameState.players.find(p => p.assignedEmail === currentUserEmail)
+                     || (gameOwnerEmail === currentUserEmail ? gameState.players.find(p => p.isLocal) : undefined));
+                const myState = myPlayer ? gameState.playerState[myPlayer.id] : null;
+                const dotColor = myPlayer?.color || myState?.color || '#888';
+                return (
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '2px' }}>
+                      COMMANDER
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {myPlayer ? (
+                        <>
+                          <span 
+                            onClick={() => handleCenterOnHome(myPlayer.id)}
+                            title="Center on Home Planet"
+                            style={{
+                              width: '12px',
+                              height: '12px',
+                              borderRadius: '50%',
+                              background: dotColor,
+                              display: 'inline-block',
+                              boxShadow: `0 0 8px ${dotColor}`,
+                              cursor: 'pointer',
+                              transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                            }}
+                            onMouseOver={(e) => {
+                              e.currentTarget.style.transform = 'scale(1.3)';
+                              e.currentTarget.style.boxShadow = `0 0 12px 3px ${dotColor}`;
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.transform = 'scale(1)';
+                              e.currentTarget.style.boxShadow = `0 0 8px ${dotColor}`;
+                            }}
+                          />
+                          <span style={{ color: 'white' }}>{myPlayer.name}</span>
+                          {myState && !myState.lost && activeRules.enableCredits && (
+                            <span style={{ fontSize: '12px', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono', marginLeft: '4px' }}>
+                              {myState.resources} CR
+                            </span>
+                          )}
+                          {myState?.lost && (
+                            <span style={{ fontSize: '10px', color: 'var(--accent-magenta)', fontFamily: 'Share Tech Mono' }}>[ELIMINATED]</span>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Observer</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.15)' }} />
+
+              {/* ACTIVE FACTION — whose turn it currently is */}
               <div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>HYPERDRIVE GLOBAL TECH</div>
-                <div className="telemetry" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  LVL {activePlayer.tech.Hyperdrive || 0}
-                  <button
-                    className="btn-sci-fi"
-                    style={{ padding: '2px 8px', fontSize: '10px' }}
-                    onClick={() => onUpgradeSystem('Hyperdrive')}
-                    disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Hyperdrive')}
-                  >
-                    UPGRADE {activeRules.enableCredits ? `(${getUpgradeCost('Hyperdrive')} CR)` : ''}
-                  </button>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '2px' }}>
+                  {isMyTurn ? '▶ YOUR TURN' : 'ACTIVE FACTION'}
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span 
+                    onClick={() => handleCenterOnHome(activePlayer.id)}
+                    title={`Center on ${activePlayer.name}'s Home Planet`}
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      background: activePlayer.color || '#ffffff',
+                      display: 'inline-block',
+                      boxShadow: `0 0 8px ${activePlayer.color || '#ffffff'}`,
+                      cursor: 'pointer',
+                      transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.transform = 'scale(1.3)';
+                      e.currentTarget.style.boxShadow = `0 0 12px 3px ${activePlayer.color || '#ffffff'}`;
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      e.currentTarget.style.boxShadow = `0 0 8px ${activePlayer.color || '#ffffff'}`;
+                    }}
+                  />
+                  <span style={{ color: isMyTurn ? 'var(--accent-green)' : 'var(--text-secondary)' }}>
+                    {activePlayer.name}
+                  </span>
                 </div>
               </div>
-            </>
-          )}
-        </div>
-
-        {/* GAME NAME INTERACTIVE SUB-PANEL */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '4px 12px',
-          borderRadius: '4px',
-          background: isEditingName ? 'rgba(0, 0, 0, 0.4)' : 'transparent',
-          border: isEditingName ? '1px solid rgba(0, 240, 255, 0.3)' : '1px solid transparent',
-          boxShadow: isEditingName ? '0 0 10px rgba(0, 240, 255, 0.1)' : 'none',
-          transition: 'all 0.2s ease',
-          pointerEvents: 'auto',
-          margin: '0 20px',
-          flex: '1',
-          justifyContent: 'center',
-          minWidth: 0
-        }}>
-          {isEditingName ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <input
-                type="text"
-                value={editedName}
-                onChange={(e) => setEditedName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveGameName();
-                  if (e.key === 'Escape') handleCancelGameName();
-                }}
-                autoFocus
-                style={{
-                  background: 'rgba(5, 3, 13, 0.85)',
-                  border: '1px solid var(--accent-cyan)',
-                  color: 'white',
-                  fontFamily: 'Share Tech Mono, monospace',
-                  fontSize: '14px',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  outline: 'none',
-                  boxShadow: '0 0 8px rgba(0, 240, 255, 0.2)',
-                  minWidth: '150px',
-                  maxWidth: '280px'
-                }}
-              />
-              <button
-                onClick={handleSaveGameName}
-                title="Save Name"
-                style={{
-                  background: 'rgba(0, 240, 255, 0.15)',
-                  border: '1px solid var(--accent-cyan)',
-                  color: 'var(--accent-cyan)',
-                  cursor: 'pointer',
-                  borderRadius: '4px',
-                  padding: '2px 8px',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.15s'
-                }}
-              >
-                ✓
-              </button>
-              <button
-                onClick={handleCancelGameName}
-                title="Cancel"
-                style={{
-                  background: 'rgba(255, 0, 127, 0.15)',
-                  border: '1px solid var(--accent-magenta)',
-                  color: 'var(--accent-magenta)',
-                  cursor: 'pointer',
-                  borderRadius: '4px',
-                  padding: '2px 8px',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.15s'
-                }}
-              >
-                ✕
-              </button>
+              
+              {activeRules.enableUpgrades && isMyTurn && (
+                <>
+                  <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>HYPERDRIVE GLOBAL TECH</div>
+                    <div className="telemetry" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      LVL {activePlayer.tech.Hyperdrive || 0}
+                      <button
+                        className="btn-sci-fi"
+                        style={{ padding: '2px 8px', fontSize: '10px' }}
+                        onClick={() => onUpgradeSystem('Hyperdrive')}
+                        disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Hyperdrive')}
+                      >
+                        UPGRADE {activeRules.enableCredits ? `(${getUpgradeCost('Hyperdrive')} CR)` : ''}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div 
-                onClick={() => setIsEditingName(true)}
+
+            {/* GAME NAME INTERACTIVE SUB-PANEL */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '4px 12px',
+              borderRadius: '4px',
+              background: isEditingName ? 'rgba(0, 0, 0, 0.4)' : 'transparent',
+              border: isEditingName ? '1px solid rgba(0, 240, 255, 0.3)' : '1px solid transparent',
+              boxShadow: isEditingName ? '0 0 10px rgba(0, 240, 255, 0.1)' : 'none',
+              transition: 'all 0.2s ease',
+              pointerEvents: 'auto',
+              margin: '0 20px',
+              flex: '1',
+              justifyContent: 'center',
+              minWidth: 0
+            }}>
+              {isEditingName ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <input
+                    type="text"
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveGameName();
+                      if (e.key === 'Escape') handleCancelGameName();
+                    }}
+                    autoFocus
+                    style={{
+                      background: 'rgba(5, 3, 13, 0.85)',
+                      border: '1px solid var(--accent-cyan)',
+                      color: 'white',
+                      fontFamily: 'Share Tech Mono, monospace',
+                      fontSize: '14px',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      outline: 'none',
+                      boxShadow: '0 0 8px rgba(0, 240, 255, 0.2)',
+                      minWidth: '150px',
+                      maxWidth: '280px'
+                    }}
+                  />
+                  <button
+                    onClick={handleSaveGameName}
+                    title="Save Name"
+                    style={{
+                      background: 'rgba(0, 240, 255, 0.15)',
+                      border: '1px solid var(--accent-cyan)',
+                      color: 'var(--accent-cyan)',
+                      cursor: 'pointer',
+                      borderRadius: '4px',
+                      padding: '2px 8px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={handleCancelGameName}
+                    title="Cancel"
+                    style={{
+                      background: 'rgba(255, 0, 127, 0.15)',
+                      border: '1px solid var(--accent-magenta)',
+                      color: 'var(--accent-magenta)',
+                      cursor: 'pointer',
+                      borderRadius: '4px',
+                      padding: '2px 8px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div 
+                    onClick={() => setIsEditingName(true)}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px', 
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      minWidth: 0
+                    }}
+                    title="Click to rename game"
+                  >
+                    <span style={{
+                      fontSize: '13px',
+                      fontWeight: 'bold',
+                      fontFamily: 'Orbitron, sans-serif',
+                      letterSpacing: '1px',
+                      color: 'white',
+                      textShadow: '0 0 6px rgba(255, 255, 255, 0.15)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '300px'
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.color = 'var(--accent-cyan)';
+                      e.currentTarget.style.textShadow = '0 0 8px rgba(0, 240, 255, 0.4)';
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.color = 'white';
+                      e.currentTarget.style.textShadow = '0 0 6px rgba(255, 255, 255, 0.15)';
+                    }}
+                    >
+                      {gameName || 'UNNAMED SIMULATION'}
+                    </span>
+                    <span 
+                      style={{ 
+                        fontSize: '11px', 
+                        opacity: 0.5,
+                        transition: 'opacity 0.2s',
+                      }}
+                    >
+                      ✏️
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', marginTop: '2px' }}>
+                    RULES: {gameState.rules?.name || 'CUSTOM'} · SEED: {gameState.seed || 'NONE'} · SIGHT: {gameState.rules?.starSightRange ?? 6.0} LY
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>GALACTIC TURN</div>
+                <div className="telemetry" style={{ fontSize: '16px', fontWeight: 'bold' }}>#{gameState.turnNumber}</div>
+              </div>
+              <button
+                className="btn-sci-fi"
+                onClick={onToggleSoundMuted}
                 style={{ 
+                  padding: '12px', 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '8px', 
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                  minWidth: 0
+                  justifyContent: 'center',
+                  width: '45px',
+                  height: '45px',
+                  minWidth: '45px'
                 }}
-                title="Click to rename game"
+                title={soundMuted ? "Unmute Sound Effects" : "Mute Sound Effects"}
               >
-                <span style={{
-                  fontSize: '13px',
-                  fontWeight: 'bold',
-                  fontFamily: 'Orbitron, sans-serif',
-                  letterSpacing: '1px',
-                  color: 'white',
-                  textShadow: '0 0 6px rgba(255, 255, 255, 0.15)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '300px'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.color = 'var(--accent-cyan)';
-                  e.currentTarget.style.textShadow = '0 0 8px rgba(0, 240, 255, 0.4)';
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.color = 'white';
-                  e.currentTarget.style.textShadow = '0 0 6px rgba(255, 255, 255, 0.15)';
-                }}
-                >
-                  {gameName || 'UNNAMED SIMULATION'}
-                </span>
-                <span 
-                  style={{ 
-                    fontSize: '11px', 
-                    opacity: 0.5,
-                    transition: 'opacity 0.2s',
-                  }}
-                >
-                  ✏️
-                </span>
-              </div>
-              <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', marginTop: '2px' }}>
-                RULES: {gameState.rules?.name || 'CUSTOM'} · SEED: {gameState.seed || 'NONE'} · SIGHT: {gameState.rules?.starSightRange ?? 6.0} LY
-              </div>
+                {soundMuted ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <line x1="23" y1="9" x2="17" y2="15"></line>
+                    <line x1="17" y1="9" x2="23" y2="15"></line>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                  </svg>
+                )}
+              </button>
+              <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: '12px 18px', fontWeight: 'bold' }}>
+                HOME
+              </button>
+              <button
+                className={`btn-sci-fi ${isMyTurn && !(activePlayerSlot && activePlayerSlot.endedTurn) ? 'pulse-light' : ''}`}
+                onClick={onEndTurn}
+                style={{ padding: '12px 24px', fontWeight: 'bold' }}
+                disabled={!isMyTurn || !!(activePlayerSlot && activePlayerSlot.endedTurn)}
+              >
+                END TURN
+              </button>
             </div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>GALACTIC TURN</div>
-            <div className="telemetry" style={{ fontSize: '16px', fontWeight: 'bold' }}>#{gameState.turnNumber}</div>
-          </div>
-          <button
-            className="btn-sci-fi"
-            onClick={onToggleSoundMuted}
-            style={{ 
-              padding: '12px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              width: '45px',
-              height: '45px',
-              minWidth: '45px'
-            }}
-            title={soundMuted ? "Unmute Sound Effects" : "Mute Sound Effects"}
-          >
-            {soundMuted ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <line x1="23" y1="9" x2="17" y2="15"></line>
-                <line x1="17" y1="9" x2="23" y2="15"></line>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-            )}
-          </button>
-          <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: '12px 18px', fontWeight: 'bold' }}>
-            HOME
-          </button>
-          <button
-            className={`btn-sci-fi ${isMyTurn && !(activePlayerSlot && activePlayerSlot.endedTurn) ? 'pulse-light' : ''}`}
-            onClick={onEndTurn}
-            style={{ padding: '12px 24px', fontWeight: 'bold' }}
-            disabled={!isMyTurn || !!(activePlayerSlot && activePlayerSlot.endedTurn)}
-          >
-            END TURN
-          </button>
-        </div>
+          </>
+        )}
       </div>
 
       {/* 2. LEFT SIDE PANEL - SYSTEM OR FLEET MANAGEMENT */}
-      <div style={{
+      <div style={isMobile ? {
+        position: 'absolute',
+        top: window.innerHeight <= 480 ? '38px' : '50px',
+        left: 0,
+        right: 0,
+        bottom: window.innerHeight <= 480 ? '40px' : '55px',
+        display: activeMobileTab === 'empire' ? 'flex' : 'none',
+        flexDirection: 'column',
+        gap: '10px',
+        pointerEvents: 'auto',
+        background: 'var(--bg-panel-light)',
+        borderRadius: 0,
+        border: 'none',
+        padding: window.innerHeight <= 480 ? '6px 12px' : '12px',
+        overflowY: 'auto'
+      } : {
         position: 'absolute',
         top: '90px',
         left: '20px',
@@ -851,11 +964,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <button
                               key={type}
                               className="btn-sci-fi"
-                              style={{ padding: '6px 8px', fontSize: '11px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+                              style={{ padding: '6px 4px', fontSize: '11px', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}
                               onClick={() => onQueueShip(type)}
                               disabled={(activeRules.enableCredits && activePlayer.resources < def.cost) || selectedSystem.buildQueue.length >= maxBuildCapacity}
+                              title={`${type} (${def.cost} CR)`}
                             >
-                              <span style={{ fontWeight: 'bold' }}>+ {type}</span>
+                              {compactMode ? (
+                                <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{getShipIcon(type)} {type.substring(0,3).toUpperCase()}</span>
+                              ) : (
+                                <span style={{ fontWeight: 'bold' }}>+ {type}</span>
+                              )}
                               {activeRules.enableCredits && (
                                 <span className="telemetry" style={{ fontSize: '10px', opacity: 0.8 }}>({def.cost} CR)</span>
                               )}
@@ -868,17 +986,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {/* UPGRADE INFRASTRUCTURE */}
                     {activeRules.enableUpgrades && (
                       <div>
-                        <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-primary)' }}>UPGRADE SYSTEMS</h3>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <h3 style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--text-primary)' }}>UPGRADE SYSTEMS</h3>
+                        <div style={compactMode ? { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' } : { display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {/* SHIPYARD */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div>
-                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Shipyard (LVL {selectedSystem.shipyardLvl})</span>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand build limit & reduce times</div>
+                          <div style={compactMode ? {
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'rgba(255,255,255,0.02)',
+                            padding: '6px 4px',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255,255,255,0.05)'
+                          } : { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={compactMode ? { textAlign: 'center' } : {}}>
+                              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>🏗️ SYD ({selectedSystem.shipyardLvl})</span>
+                              {!compactMode && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand build limit & reduce times</div>}
                             </div>
                             <button
                               className="btn-sci-fi"
-                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              style={{ padding: '4px 6px', fontSize: '10px', width: compactMode ? '100%' : 'auto', justifyContent: 'center' }}
                               onClick={() => onUpgradeSystem('Shipyard', selectedSystem.id)}
                               disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Shipyard', selectedSystem)}
                             >
@@ -887,14 +1014,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </div>
 
                           {/* SENSORS */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div>
-                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Sensors (LVL {selectedSystem.sensorLvl})</span>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand map scanner range</div>
+                          <div style={compactMode ? {
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'rgba(255,255,255,0.02)',
+                            padding: '6px 4px',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255,255,255,0.05)'
+                          } : { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={compactMode ? { textAlign: 'center' } : {}}>
+                              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>📡 SNS ({selectedSystem.sensorLvl})</span>
+                              {!compactMode && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand map scanner range</div>}
                             </div>
                             <button
                               className="btn-sci-fi"
-                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              style={{ padding: '4px 6px', fontSize: '10px', width: compactMode ? '100%' : 'auto', justifyContent: 'center' }}
                               onClick={() => onUpgradeSystem('Sensors', selectedSystem.id)}
                               disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Sensors', selectedSystem)}
                             >
@@ -903,14 +1039,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </div>
 
                           {/* SHIELDS */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div>
-                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Shields (LVL {selectedSystem.shieldsLvl})</span>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Absorbs combat damage</div>
+                          <div style={compactMode ? {
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'rgba(255,255,255,0.02)',
+                            padding: '6px 4px',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255,255,255,0.05)'
+                          } : { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div style={compactMode ? { textAlign: 'center' } : {}}>
+                              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>🛡️ SHD ({selectedSystem.shieldsLvl})</span>
+                              {!compactMode && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Absorbs combat damage</div>}
                             </div>
                             <button
                               className="btn-sci-fi"
-                              style={{ padding: '4px 10px', fontSize: '11px' }}
+                              style={{ padding: '4px 6px', fontSize: '10px', width: compactMode ? '100%' : 'auto', justifyContent: 'center' }}
                               onClick={() => onUpgradeSystem('Shields', selectedSystem.id)}
                               disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Shields', selectedSystem)}
                             >
@@ -1249,7 +1394,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* 3. RIGHT SIDE PANEL - FLEET DISPATCH OR COMBAT LOG */}
-      <div style={{
+      <div style={isMobile ? {
+        position: 'absolute',
+        top: window.innerHeight <= 480 ? '38px' : '50px',
+        left: 0,
+        right: 0,
+        bottom: window.innerHeight <= 480 ? '40px' : '55px',
+        display: activeMobileTab === 'tactics' ? 'flex' : 'none',
+        flexDirection: 'column',
+        gap: '10px',
+        pointerEvents: 'auto',
+        background: 'var(--bg-panel-light)',
+        borderRadius: 0,
+        border: 'none',
+        padding: window.innerHeight <= 480 ? '6px 12px' : '12px',
+        overflowY: 'auto'
+      } : {
         position: 'absolute',
         top: '90px',
         right: '20px',
@@ -1342,13 +1502,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div style={{
                 border: '1px dashed rgba(0, 240, 255, 0.2)',
                 background: 'rgba(0, 240, 255, 0.02)',
-                padding: '20px',
+                padding: '16px',
                 borderRadius: '8px',
                 textAlign: 'center',
                 color: 'var(--text-secondary)',
-                fontSize: '12px'
+                fontSize: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                alignItems: 'center'
               }}>
-                To deploy a traveling swarm, select a base you own, then Ctrl + left-click on any other star system on the map to set it as destination.
+                <div>
+                  To deploy a traveling swarm, select a base you own, then Ctrl + left-click on any other star system on the map to set it as destination.
+                </div>
+                {(isMobile || compactMode) && (
+                  <button
+                    className={`btn-sci-fi ${isSelectingTarget ? 'btn-danger' : ''}`}
+                    onClick={() => {
+                      setIsSelectingTarget(!isSelectingTarget);
+                      if (isMobile) {
+                        // Switch to map tab so player can choose the target
+                        setActiveMobileTab('map');
+                      }
+                    }}
+                    style={{ padding: '8px 16px', fontSize: '11px', width: '100%', justifyContent: 'center' }}
+                  >
+                    {isSelectingTarget ? '🚫 CANCEL TARGETING' : '🎯 SET SWARM DESTINATION'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1711,6 +1892,91 @@ export const Dashboard: React.FC<DashboardProps> = ({
               [COMM CODES SYNCING IN BACKGROUND...]
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MOBILE BOTTOM NAVIGATION TAB BAR */}
+      {isMobile && (
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: window.innerHeight <= 480 ? '40px' : '55px',
+          display: 'flex',
+          justifyContent: 'space-around',
+          alignItems: 'center',
+          background: 'rgba(10, 7, 24, 0.95)',
+          borderTop: '1px solid rgba(0, 240, 255, 0.25)',
+          boxShadow: '0 -4px 15px rgba(0, 240, 255, 0.1)',
+          pointerEvents: 'auto',
+          zIndex: 100
+        }}>
+          <button 
+            onClick={() => setActiveMobileTab('map')}
+            style={{
+              flex: 1,
+              height: '100%',
+              background: 'transparent',
+              border: 'none',
+              color: activeMobileTab === 'map' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: window.innerHeight <= 480 ? '2px' : '4px',
+              fontFamily: 'Share Tech Mono',
+              fontSize: window.innerHeight <= 480 ? '9px' : '11px',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: window.innerHeight <= 480 ? '14px' : '18px' }}>🗺️</span>
+            <span>MAP</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveMobileTab('empire')}
+            style={{
+              flex: 1,
+              height: '100%',
+              background: 'transparent',
+              border: 'none',
+              color: activeMobileTab === 'empire' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: window.innerHeight <= 480 ? '2px' : '4px',
+              fontFamily: 'Share Tech Mono',
+              fontSize: window.innerHeight <= 480 ? '9px' : '11px',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: window.innerHeight <= 480 ? '14px' : '18px' }}>🌌</span>
+            <span>EMPIRE</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveMobileTab('tactics')}
+            style={{
+              flex: 1,
+              height: '100%',
+              background: 'transparent',
+              border: 'none',
+              color: activeMobileTab === 'tactics' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: window.innerHeight <= 480 ? '2px' : '4px',
+              fontFamily: 'Share Tech Mono',
+              fontSize: window.innerHeight <= 480 ? '9px' : '11px',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: window.innerHeight <= 480 ? '14px' : '18px' }}>📋</span>
+            <span>TACTICS</span>
+          </button>
         </div>
       )}
     </div>

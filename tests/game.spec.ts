@@ -22,7 +22,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const randomEmail = `commander-${Date.now()}@example.com`;
     
     // 1. Navigate to the local server
-    await page.goto('http://localhost:8080/');
+    await page.goto('http://127.0.0.1:8080/');
 
     // Verify Title
     await expect(page).toHaveTitle(/Star-Swarm | Tactical Space strategy/i);
@@ -117,7 +117,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const randomEmail = `simple-commander-${Date.now()}@example.com`;
     
     // 1. Navigate to the local server
-    await page.goto('http://localhost:8080/');
+    await page.goto('http://127.0.0.1:8080/');
 
     // 2. Open auth modal and register a new commander account
     const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
@@ -215,7 +215,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const userB = `user-b-${Date.now()}@example.com`;
 
     // --- USER A FLOW ---
-    await page.goto('http://localhost:8080/');
+    await page.goto('http://127.0.0.1:8080/');
 
     // Login User A
     const linkBtnA = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
@@ -305,7 +305,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const randomEmail = `sequential-commander-${Date.now()}@example.com`;
 
     // 1. Navigate to the local server
-    await page.goto('http://localhost:8080/');
+    await page.goto('http://127.0.0.1:8080/');
 
     // 2. Register & Login
     const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
@@ -370,7 +370,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     // 1. Setup Context B for User B: Register and log in
     const contextB = await browser.newContext();
     const pageB = await contextB.newPage();
-    await pageB.goto('http://localhost:8080/');
+    await pageB.goto('http://127.0.0.1:8080/');
     const establishLinkBtnB = pageB.locator('button:has-text("ESTABLISH COMMAND LINK")');
     await establishLinkBtnB.click();
     const registerTabB = pageB.locator('button:has-text("REGISTER")');
@@ -388,7 +388,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     // 2. Setup Context A for User A: Register, log in, configure lobby
     const contextA = await browser.newContext();
     const pageA = await contextA.newPage();
-    await pageA.goto('http://localhost:8080/');
+    await pageA.goto('http://127.0.0.1:8080/');
     const establishLinkBtnA = pageA.locator('button:has-text("ESTABLISH COMMAND LINK")');
     await establishLinkBtnA.click();
     const registerTabA = pageA.locator('button:has-text("REGISTER")');
@@ -441,7 +441,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     await expect(pageA.locator(`text=${userB}`).first()).toBeVisible();
 
     // 5. User B navigates to the game URL
-    await pageB.goto(`http://localhost:8080/?gameId=${gameId}`);
+    await pageB.goto(`http://127.0.0.1:8080/?gameId=${gameId}`);
     
     // Page B should load the game screen since User B is already logged in
     await expect(pageB.locator('canvas')).toBeVisible();
@@ -496,7 +496,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const userB = `guest-${Date.now()}@example.com`;
 
     // --- HOST (USER A) FLOW ---
-    await pageA.goto('http://localhost:8080/');
+    await pageA.goto('http://127.0.0.1:8080/');
     await pageA.locator('button:has-text("ESTABLISH COMMAND LINK")').click();
     await pageA.locator('button:has-text("REGISTER")').click();
     await pageA.locator('input[type="email"]').fill(userA);
@@ -557,7 +557,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     // --- GUEST (USER B) FLOW ---
     const contextB = await browser.newContext();
     const pageB = await contextB.newPage();
-    await pageB.goto('http://localhost:8080/');
+    await pageB.goto('http://127.0.0.1:8080/');
 
     // Register & Login User B
     await pageB.locator('button:has-text("ESTABLISH COMMAND LINK")').click();
@@ -573,14 +573,14 @@ test.describe('Star-Swarm E2E Tests', () => {
     await expect(pageB.locator('button:has-text("LOG OUT")')).toBeVisible();
 
     // Navigate using the shortened invite link (short code)
-    await pageB.goto(`http://localhost:8080/?gameId=${shortCode}`);
+    await pageB.goto(`http://127.0.0.1:8080/?gameId=${shortCode}`);
     await expect(pageB.locator('canvas')).toBeVisible(); // Should load the game successfully!
 
     // Return User B to menu
     await pageB.locator('button:has-text("HOME")').click();
 
     // Navigate using the original UUID link
-    await pageB.goto(`http://localhost:8080/?gameId=${uuid}`);
+    await pageB.goto(`http://127.0.0.1:8080/?gameId=${uuid}`);
     await expect(pageB.locator('canvas')).toBeVisible(); // Should also load the game successfully!
 
     await contextA.close();
@@ -593,7 +593,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const pageA = await contextA.newPage();
 
     // Navigate to homepage without logging in
-    await pageA.goto('http://localhost:8080/');
+    await pageA.goto('http://127.0.0.1:8080/');
 
     // Open skirmish match lobby
     await pageA.locator('button:has-text("SKIRMISH MATCH")').click();
@@ -625,7 +625,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const pageB = await contextB.newPage();
 
     // Navigate using the shortened invite link
-    await pageB.goto(`http://localhost:8080/?gameId=${shortCode}`);
+    await pageB.goto(`http://127.0.0.1:8080/?gameId=${shortCode}`);
 
     // Since Guest B is not logged in and not assigned yet, they should see the waiting overlay
     // displaying the text "ENTER DISPLAY NAME TO JOIN:"
@@ -663,7 +663,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const randomEmail = `turnstart-commander-${Date.now()}@example.com`;
 
     // 1. Navigate to the local server
-    await page.goto('http://localhost:8080/');
+    await page.goto('http://127.0.0.1:8080/');
 
     // 2. Register & Login
     const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
@@ -697,7 +697,7 @@ test.describe('Star-Swarm E2E Tests', () => {
     const gameId = createData.gameId;
 
     // Fetch the actual initialized game state from the backend API
-    const getResponse = await page.request.get(`http://localhost:8080/api/games/${gameId}`);
+    const getResponse = await page.request.get(`http://127.0.0.1:8080/api/games/${gameId}`);
     const getData = await getResponse.json();
     const gameState = getData.game.gameState;
 

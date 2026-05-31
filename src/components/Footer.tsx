@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface FooterProps {
-  onNavigate: (screen: 'terms' | 'privacy') => void;
+  onNavigate: (screen: 'terms' | 'privacy' | 'about') => void;
 }
 
 /** GitHub SVG icon (Octicon mark-github) — MIT-licensed from GitHub's official icon set */
@@ -39,6 +39,16 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
         gap: '20px',
         pointerEvents: 'auto'
       }}>
+        <FooterLink onClick={() => onNavigate('about')}>
+          About
+        </FooterLink>
+
+        <span style={{
+          color: 'rgba(100, 116, 139, 0.4)',
+          fontSize: '10px',
+          userSelect: 'none'
+        }}>•</span>
+
         <FooterLink onClick={() => onNavigate('terms')}>
           Terms of Service
         </FooterLink>

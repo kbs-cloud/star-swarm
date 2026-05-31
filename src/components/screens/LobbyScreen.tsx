@@ -71,23 +71,26 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 }) => {
   return (
     <div style={{
-      height: '100vh',
+      height: 'calc(100vh - 40px)',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
       zIndex: 1,
       position: 'relative',
-      padding: '20px'
+      padding: '20px',
+      boxSizing: 'border-box'
     }}>
       <div style={{
         width: '650px',
+        maxWidth: '100%',
         padding: '30px',
         display: 'flex',
         flexDirection: 'column',
         gap: '20px',
-        maxHeight: '90vh',
-        overflowY: 'auto'
+        maxHeight: '100%',
+        overflowY: 'auto',
+        boxSizing: 'border-box'
       }} className="glass-panel glass-panel-neon-cyan">
         <h2 style={{ fontSize: '24px', color: 'var(--accent-cyan)', textAlign: 'center', fontFamily: 'Orbitron' }}>
           TACTICAL SETUP LOBBY

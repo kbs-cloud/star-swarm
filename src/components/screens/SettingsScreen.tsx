@@ -21,6 +21,9 @@ interface SettingsScreenProps {
   onShowToast: (msg: string, type?: 'success' | 'info' | 'warning') => void;
   onSetCurrentUser: (user: UserAccount | null) => void;
   onNavigateMenu: () => void;
+  settingsCompactMode: boolean;
+  setSettingsCompactMode: (v: boolean) => void;
+  isMobile?: boolean;
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
@@ -39,7 +42,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onCancel,
   onShowToast,
   onSetCurrentUser,
-  onNavigateMenu
+  onNavigateMenu,
+  settingsCompactMode,
+  setSettingsCompactMode,
+  isMobile = false
 }) => {
   const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,21 +90,26 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
   return (
     <div style={{
-      height: '100vh',
+      height: 'calc(100vh - 40px)',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center',
       zIndex: 1,
       position: 'relative',
-      padding: '20px'
+      padding: '20px',
+      boxSizing: 'border-box'
     }}>
       <div style={{
         width: '450px',
+        maxWidth: '100%',
+        maxHeight: '100%',
+        overflowY: 'auto',
         padding: '30px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px'
+        gap: '20px',
+        boxSizing: 'border-box'
       }} className="glass-panel glass-panel-neon-cyan">
         <h2 style={{ fontSize: '24px', color: 'var(--accent-cyan)', textAlign: 'center', fontFamily: 'Orbitron' }}>
           COMMANDER SETTINGS
@@ -123,6 +134,37 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               fontFamily: 'Share Tech Mono'
             }}
           />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '5px' }}>
+          <input
+            type="checkbox"
+            id="compact-mode-checkbox"
+            checked={settingsCompactMode || isMobile}
+            disabled={isMobile}
+            onChange={(e) => setSettingsCompactMode(e.target.checked)}
+            style={{
+              width: '18px',
+              height: '18px',
+              accentColor: 'var(--accent-cyan)',
+              cursor: isMobile ? 'not-allowed' : 'pointer',
+              opacity: isMobile ? 0.7 : 1
+            }}
+          />
+          <label
+            htmlFor="compact-mode-checkbox"
+            style={{
+              fontSize: '12px',
+              color: isMobile ? 'var(--accent-cyan)' : 'var(--text-primary)',
+              fontFamily: 'Share Tech Mono',
+              cursor: isMobile ? 'default' : 'pointer',
+              userSelect: 'none',
+              textTransform: 'uppercase',
+              letterSpacing: '1px'
+            }}
+          >
+            Enable Compact Mode {isMobile ? '(Auto-Active on Mobile Viewport)' : '(Mobile Optimized)'}
+          </label>
         </div>
 
         {/* Security Section (Change Password) */}
