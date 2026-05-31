@@ -1,3 +1,4 @@
+import { PlayerSetup } from './types';
 import React, { useState } from 'react';
 import {
   GameState,
@@ -8,8 +9,11 @@ import {
   NORMAL_RULES,
   SIMPLE_RULES
 } from './game/gameState';
-import { StarMap } from './components/StarMap';
-import { Dashboard } from './components/Dashboard';
+
+
+import { Footer } from './components/Footer';
+import { TermsOfService } from './components/TermsOfService';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
 import {
   getCurrentUser,
   registerUser,
@@ -26,12 +30,12 @@ import {
   createGame,
   getGame,
   updateGame,
-  updateGameName,
-  deleteGame,
   GameMetadata,
+  updateGameName,
+
   updateSettings,
-  updatePassword,
-  requestToJoin,
+
+
   fetchPendingJoins,
   checkMyJoinStatus,
   acceptJoinRequest,
@@ -40,45 +44,34 @@ import {
   performGameAction
 } from './game/gameApi';
 
-type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings';
 
-interface PlayerSetup {
-  id: number;
-  name: string;
-  type: 'human' | 'ai';
-  team: number;
-  color?: string;
-  isLocal?: boolean;
-  assignedEmail?: string | null;
-  endedTurn?: boolean;
-}
 
-const copyToClipboard = (text: string): Promise<boolean> => {
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    return navigator.clipboard.writeText(text)
-      .then(() => true)
-      .catch(() => false);
-  }
-  
-  // Fallback for insecure contexts
-  try {
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.top = '0';
-    textArea.style.left = '0';
-    textArea.style.opacity = '0';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    const successful = document.execCommand('copy');
-    document.body.removeChild(textArea);
-    return Promise.resolve(successful);
-  } catch (err) {
-    console.error('Fallback clipboard copy failed:', err);
-    return Promise.resolve(false);
-  }
-};
+
+
+// HUD Components
+import { AlertHud } from './components/hud/AlertHud';
+import { ToastHud } from './components/hud/ToastHud';
+import { NotificationsStack } from './components/hud/NotificationsStack';
+import { AuthBar } from './components/hud/AuthBar';
+import { JoinRequestOverlay } from './components/hud/JoinRequestOverlay';
+
+// Screen Components
+import { GameOverScreen } from './components/screens/GameOverScreen';
+import { PassTurnScreen } from './components/screens/PassTurnScreen';
+import { SettingsScreen } from './components/screens/SettingsScreen';
+import { GameScreen } from './components/screens/GameScreen';
+import { LobbyScreen } from './components/screens/LobbyScreen';
+import { MenuScreen } from './components/screens/MenuScreen';
+
+// Modal Components
+import { AuthModal } from './components/modals/AuthModal';
+import { DeleteGameModal } from './components/modals/DeleteGameModal';
+import { ImportRulesModal } from './components/modals/ImportRulesModal';
+import { RulesEditorModal } from './components/modals/RulesEditorModal';
+import { ImportPreviewModal } from './components/modals/ImportPreviewModal';
+
+type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings' | 'terms' | 'privacy';
+
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('menu');
@@ -261,7 +254,7 @@ export default function App() {
 
   // Toast notification (success/info style, distinct from error alertMsg)
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<'success' | 'info' | 'warning'>('info');
+  const [toastType, setToastType] = useState<'success' | 'info' | 'warning' | null>('info');
 
   const showToast = (msg: string, type: 'success' | 'info' | 'warning' = 'info', durationMs = 5000) => {
     setToastMsg(msg);
@@ -535,51 +528,7 @@ export default function App() {
     setScreen('menu');
   };
 
-  // Helper: Securely change password
-  const handleSavePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordStatusMessage(null);
-    setPasswordStatusType(null);
 
-    if (!currentUser) {
-      setPasswordStatusMessage('You must be logged in to change your password.');
-      setPasswordStatusType('error');
-      return;
-    }
-
-    if (!settingsNewPassword || settingsNewPassword.length < 8) {
-      setPasswordStatusMessage('New password must be at least 8 characters long.');
-      setPasswordStatusType('error');
-      return;
-    }
-
-    if (settingsNewPassword !== settingsConfirmPassword) {
-      setPasswordStatusMessage('New passwords do not match.');
-      setPasswordStatusType('error');
-      return;
-    }
-
-    const res = await updatePassword(settingsNewPassword);
-    if (res.success) {
-      setPasswordStatusMessage('Password updated successfully. You will be logged out...');
-      setPasswordStatusType('success');
-      showToast('Password updated successfully. Re-authenticating...', 'success');
-
-      // Clear password fields
-      setSettingsNewPassword('');
-      setSettingsConfirmPassword('');
-
-      // Invalidate active session and log out
-      setTimeout(() => {
-        setCurrentUser(null);
-        setScreen('menu');
-        window.location.reload();
-      }, 2000);
-    } else {
-      setPasswordStatusMessage(res.error || 'Failed to change password.');
-      setPasswordStatusType('error');
-    }
-  };
 
   // Helper: Rename player in game
   const handleRenamePlayer = (playerId: number, newName: string) => {
@@ -634,85 +583,7 @@ export default function App() {
     }
   };
 
-  // Helper: Get Game Turn Status for home page saved games
-  const getGameTurnStatus = (game: GameMetadata, currentUserEmail: string | null) => {
-    let state: GameState;
-    try {
-      state = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
-    } catch (e) {
-      return 'UNKNOWN';
-    }
-    if (!state || !state.players || !state.playerState) return 'UNKNOWN';
 
-    const activeTeams = new Set<number>();
-    state.players.forEach(p => {
-      const pState = state.playerState[p.id];
-      if (pState && !pState.lost) {
-        activeTeams.add(p.team);
-      }
-    });
-    if (activeTeams.size <= 1) {
-      return 'GAME OVER';
-    }
-
-    const activeHumans = state.players.filter(p => p.type === 'human' && !state.playerState[p.id]?.lost);
-    const userPlayer = activeHumans.find(p => p.assignedEmail === currentUserEmail || (p.id === 1 && p.isLocal));
-
-    if (state.turnStyle === 'sequential') {
-      const activePlayer = state.players[state.activePlayerIdx];
-      if (userPlayer && activePlayer && activePlayer.id === userPlayer.id) {
-        return 'YOUR TURN';
-      }
-      if (activePlayer) {
-        return `WAITING ON: ${activePlayer.name.toUpperCase()}`;
-      }
-      return 'PROCESSING TURN...';
-    }
-
-    if (userPlayer && !userPlayer.endedTurn) {
-      return 'YOUR TURN';
-    }
-
-    const pendingPlayers = activeHumans.filter(p => !p.endedTurn);
-    if (pendingPlayers.length === 1) {
-      return `WAITING ON: ${pendingPlayers[0].name.toUpperCase()}`;
-    } else if (pendingPlayers.length > 1) {
-      return 'WAITING ON OTHER PLAYERS';
-    }
-
-    return 'PROCESSING TURN...';
-  };
-
-  // Helper: Check if end turn can be cancelled from the home screen
-  const canCancelEndTurnInGame = (game: GameMetadata): boolean => {
-    if (!currentUser) return false;
-    let state: GameState;
-    try {
-      state = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
-    } catch (e) {
-      return false;
-    }
-    if (!state || !state.players || !state.playerState) return false;
-
-    if (state.turnStyle === 'sequential') return false;
-
-    const activeTeams = new Set<number>();
-    state.players.forEach(p => {
-      const pState = state.playerState[p.id];
-      if (pState && !pState.lost) {
-        activeTeams.add(p.team);
-      }
-    });
-    if (activeTeams.size <= 1) return false;
-
-    const activeHumans = state.players.filter(p => p.type === 'human' && !state.playerState[p.id]?.lost);
-    const userPlayer = activeHumans.find(p => p.assignedEmail === currentUser.email || (p.id === 1 && p.isLocal));
-
-    if (!userPlayer || !userPlayer.endedTurn) return false;
-
-    const othersPending = activeHumans.some(p => p.id !== userPlayer.id && !p.endedTurn);
-    return othersPending;
-  };
 
   // Initialize CSRF and restore session cookie on mount
   React.useEffect(() => {
@@ -1790,3241 +1661,334 @@ export default function App() {
       <div className="space-bg" />
 
       {/* ERROR HUD ALERTS */}
-      {alertMsg && (
-        <div style={{
-          position: 'absolute',
-          top: '90px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'rgba(255, 0, 127, 0.95)',
-          border: '2px solid var(--accent-magenta)',
-          boxShadow: '0 0 20px rgba(255,0,127,0.5)',
-          color: 'white',
-          padding: '10px 24px',
-          borderRadius: '6px',
-          zIndex: 100,
-          fontWeight: 'bold',
-          fontFamily: 'Share Tech Mono',
-          letterSpacing: '1px',
-          pointerEvents: 'none'
-        }} className="pulse-light">
-          {alertMsg}
-        </div>
-      )}
+      <AlertHud message={alertMsg} />
+
+      {/* SUCCESS / INFO / WARNING TOAST */}
+      <ToastHud message={toastMsg} type={toastType || 'info'} />
+
 
       {/* IN-GAME NOTIFICATIONS STACK */}
-      {screen === 'game' && notifications.length > 0 && (
-        <div style={{
-          position: 'fixed',
-          top: '95px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 10002,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          width: '380px',
-          maxWidth: '90vw',
-          pointerEvents: 'none'
-        }}>
-          {notifications.map(notif => {
-            const isProd = notif.type === 'production';
-            const borderColors = {
-              turn_start: 'rgba(0, 240, 255, 0.4)',
-              production: 'rgba(57, 255, 20, 0.4)',
-              info: 'rgba(0, 240, 255, 0.3)',
-              success: 'rgba(57, 255, 20, 0.3)',
-              warning: 'rgba(255, 170, 0, 0.3)'
-            };
-            const glowColors = {
-              turn_start: 'rgba(0, 240, 255, 0.15)',
-              production: 'rgba(57, 255, 20, 0.15)',
-              info: 'rgba(0, 240, 255, 0.1)',
-              success: 'rgba(57, 255, 20, 0.1)',
-              warning: 'rgba(255, 170, 0, 0.1)'
-            };
-            const bgGradient = isProd
-              ? 'linear-gradient(135deg, rgba(13, 29, 15, 0.9) 0%, rgba(5, 13, 6, 0.95) 100%)'
-              : 'linear-gradient(135deg, rgba(10, 15, 29, 0.9) 0%, rgba(5, 7, 13, 0.95) 100%)';
-            const borderColor = borderColors[notif.type] || borderColors.info;
-            const glowColor = glowColors[notif.type] || glowColors.info;
-
-            return (
-              <div
-                key={notif.id}
-                onClick={() => dismissNotification(notif.id, notif.systemId)}
-                style={{
-                  background: bgGradient,
-                  backdropFilter: 'blur(12px)',
-                  border: `1px solid ${borderColor}`,
-                  boxShadow: `0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 0 15px ${glowColor}`,
-                  borderRadius: '8px',
-                  padding: '12px 16px',
-                  color: 'white',
-                  cursor: 'pointer',
-                  pointerEvents: 'auto',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '12px',
-                  fontFamily: 'Outfit, sans-serif',
-                  transition: 'transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
-                  userSelect: 'none',
-                  animation: 'slideDownFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards'
-                }}
-                className="notification-card"
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-2px) scale(1.02)';
-                  e.currentTarget.style.borderColor = isProd ? 'var(--accent-green)' : 'var(--accent-cyan)';
-                  e.currentTarget.style.boxShadow = `0 12px 40px 0 rgba(0, 0, 0, 0.7), 0 0 15px ${isProd ? 'rgba(57,255,20,0.3)' : 'rgba(0,240,255,0.3)'}`;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                  e.currentTarget.style.borderColor = borderColor;
-                  e.currentTarget.style.boxShadow = `0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 0 15px ${glowColor}`;
-                }}
-                title={notif.systemId !== undefined ? "Left-click to center on planet & dismiss" : "Left-click to dismiss"}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: '13px', lineHeight: '1.4', flex: 1, minWidth: 0, textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                    {/* TODO(security): React's native string interpolation automatically escapes notif.message, preventing XSS. */}
-                    {notif.message}
-                  </span>
-                  {notif.systemId !== undefined && (
-                    <span 
-                      style={{ 
-                        fontSize: '11px', 
-                        color: 'var(--accent-cyan)', 
-                        background: 'rgba(0, 240, 255, 0.1)', 
-                        padding: '2px 6px', 
-                        borderRadius: '4px',
-                        fontFamily: 'Share Tech Mono',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      LOCATE 📍
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    dismissNotification(notif.id);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    padding: '4px 6px',
-                    lineHeight: '1',
-                    transition: 'color 0.15s ease'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = 'white'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                  title="Dismiss only"
-                >
-                  ✕
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* TOAST NOTIFICATIONS (success / info / warning) */}
-      {toastMsg && (
-        <div style={{
-          position: 'fixed',
-          bottom: '30px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: toastType === 'success'
-            ? 'rgba(0, 180, 90, 0.96)'
-            : toastType === 'warning'
-              ? 'rgba(200, 120, 0, 0.96)'
-              : 'rgba(0, 140, 200, 0.96)',
-          border: `2px solid ${toastType === 'success' ? '#39ff14' : toastType === 'warning' ? '#ffaa00' : '#00f0ff'}`,
-          boxShadow: `0 4px 24px ${toastType === 'success' ? 'rgba(57,255,20,0.35)' : toastType === 'warning' ? 'rgba(255,170,0,0.35)' : 'rgba(0,240,255,0.35)'}`,
-          color: 'white',
-          padding: '12px 28px',
-          borderRadius: '8px',
-          zIndex: 10001,
-          fontWeight: 'bold',
-          fontFamily: 'Share Tech Mono',
-          letterSpacing: '0.5px',
-          fontSize: '14px',
-          pointerEvents: 'none',
-          whiteSpace: 'nowrap'
-        }} className="pulse-light">
-          {toastMsg}
-        </div>
+      {screen === 'game' && (
+        <NotificationsStack
+          notifications={notifications}
+          onDismiss={dismissNotification}
+        />
       )}
 
       {/* AUTHENTICATION HUD OVERLAY (Only visible in menus/lobby) */}
-      {(screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings') && (
-        <div style={{
-          position: 'absolute',
-          top: '20px',
-          right: '20px',
-          zIndex: 100,
-          display: 'flex',
-          gap: '12px',
-          alignItems: 'center',
-          background: 'var(--bg-panel)',
-          backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(0, 240, 255, 0.2)',
-          boxShadow: '0 0 15px rgba(0, 240, 255, 0.1)',
-          borderRadius: '8px',
-          padding: '8px 16px'
-        }}>
-          {/* MUTE TOGGLE */}
-          <button
-            className="btn-sci-fi"
-            onClick={toggleSoundMuted}
-            style={{ 
-              padding: '6px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              width: '32px',
-              height: '32px',
-              minWidth: '32px',
-              borderRadius: '6px'
-            }}
-            title={soundMuted ? "Unmute Sound Effects" : "Mute Sound Effects"}
-          >
-            {soundMuted ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <line x1="23" y1="9" x2="17" y2="15"></line>
-                <line x1="17" y1="9" x2="23" y2="15"></line>
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-            )}
-          </button>
-
-          {currentUser ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>COMMAND CODES ACTIVE</div>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent-cyan)' }}>
-                  {currentUser.displayName || currentUser.email}
-                </div>
-                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }} className="telemetry">
-                  RECORD: {currentUser.stats.gamesWon}W - {currentUser.stats.gamesPlayed - currentUser.stats.gamesWon}L
-                </div>
-              </div>
-              <button className="btn-sci-fi" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={() => setScreen('settings')}>
-                SETTINGS
-              </button>
-              <button className="btn-sci-fi btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={handleLogout}>
-                LOG OUT
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <button className="btn-sci-fi" style={{ padding: '8px 16px', fontSize: '12px' }} onClick={() => setScreen('settings')}>
-                SETTINGS
-              </button>
-              <button className="btn-sci-fi" style={{ padding: '8px 16px', fontSize: '12px' }} onClick={() => { clearAuthInputs(); setIsAuthModalOpen(true); }}>
-                ESTABLISH COMMAND LINK
-              </button>
-            </div>
-          )}
-        </div>
+      {(screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings' || screen === 'terms' || screen === 'privacy') && (
+        <AuthBar
+          currentUser={currentUser}
+          soundMuted={soundMuted}
+          onToggleSoundMuted={toggleSoundMuted}
+          onOpenAuth={() => {
+            clearAuthInputs();
+            setIsAuthModalOpen(true);
+          }}
+          onLogout={handleLogout}
+          onNavigateSettings={() => setScreen('settings')}
+        />
       )}
 
-      {/* JOIN REQUEST WAITING OVERLAY */}
-      {pendingJoinGameId && !gameState && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, width: '100vw', height: '100vh',
-          background: 'rgba(5, 10, 20, 0.93)',
-          backdropFilter: 'blur(14px)',
-          zIndex: 9000,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          fontFamily: 'Orbitron'
-        }}>
-          <div style={{
-            width: '480px',
-            padding: '40px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px',
-            textAlign: 'center'
-          }} className="glass-panel glass-panel-neon-cyan pulse-light">
-            <div style={{ fontSize: '52px' }}>📡</div>
-            <h2 style={{ fontSize: '22px', color: 'var(--accent-cyan)', letterSpacing: '2px', margin: 0 }}>
-              {myJoinStatus === 'rejected' ? 'REQUEST DECLINED' : 'AWAITING HOST CLEARANCE'}
-            </h2>
-            {myJoinStatus === 'rejected' ? (
-              <div style={{ fontSize: '14px', color: 'var(--accent-magenta)', lineHeight: '1.6' }}>
-                The host has declined your join request.
-              </div>
-            ) : (
-              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                {myJoinStatus === 'pending'
-                  ? 'Your join request has been sent. Waiting for the host to assign you a faction slot…'
-                  : 'No free faction slots were available in this simulation. Click below to request a slot from the host.'}
-              </div>
-            )}
-
-            {!currentUser && myJoinStatus !== 'pending' && myJoinStatus !== 'rejected' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'left', width: '100%', marginBottom: '15px' }}>
-                <label style={{ fontSize: '11px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron' }}>ENTER DISPLAY NAME TO JOIN:</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Admiral Alice"
-                  value={guestName}
-                  onChange={(e) => updateGuestName(e.target.value)}
-                  className="input-sci-fi"
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    background: 'rgba(0, 0, 0, 0.4)',
-                    border: '1px solid rgba(0, 240, 255, 0.3)',
-                    borderRadius: '4px',
-                    padding: '8px 12px',
-                    color: 'white',
-                    fontSize: '13px',
-                    fontFamily: 'Share Tech Mono',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-            )}
-
-            {myJoinStatus !== 'pending' && myJoinStatus !== 'rejected' && (
-              <button
-                className="btn-sci-fi pulse-light"
-                style={{ justifyContent: 'center', fontSize: '13px' }}
-                onClick={async () => {
-                  if (!pendingJoinGameId) return;
-                  if (!currentUser && (!guestName || guestName.trim().length === 0)) {
-                    showError('Please enter a display name.');
-                    return;
-                  }
-                  const emailParam = currentUser ? undefined : guestName;
-                  const res = await requestToJoin(pendingJoinGameId, emailParam);
-                  if (res.success) {
-                    setMyJoinStatus('pending');
-                    showToast('📡 Join request sent! Waiting for host approval…', 'info');
-                  } else {
-                    showError(res.error || 'Failed to send join request.');
-                  }
-                }}
-              >
-                REQUEST TO JOIN SIMULATION
-              </button>
-            )}
-
-            {myJoinStatus === 'pending' && (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }} className="animate-pulse">
-                [POLLING HOST RESPONSE…]
-              </div>
-            )}
-
-            <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-
-            <button
-              className="btn-sci-fi btn-danger"
-              style={{ justifyContent: 'center', fontSize: '12px' }}
-              onClick={() => {
-                setPendingJoinGameId(null);
-                setMyJoinStatus(null);
-                setActiveGameId(null);
-                clearUrlQuery();
-              }}
-            >
-              CANCEL & RETURN TO MENU
-            </button>
-          </div>
-        </div>
-      )}
+      {/* JOIN REQUEST OVERLAY FOR REQUESTOR */}
+      <JoinRequestOverlay
+        pendingJoinGameId={pendingJoinGameId}
+        myJoinStatus={myJoinStatus}
+        currentUser={currentUser}
+        guestName={guestName}
+        onUpdateGuestName={updateGuestName}
+        onCancel={() => {
+          setPendingJoinGameId(null);
+          setMyJoinStatus(null);
+          setActiveGameId(null);
+          clearUrlQuery();
+        }}
+        onShowError={(msg) => {
+          setAlertMsg(msg);
+          setTimeout(() => setAlertMsg(null), 5000);
+        }}
+        onShowToast={(msg, type) => {
+          setToastMsg(msg);
+          setToastType(type || 'info');
+          setTimeout(() => {
+            setToastMsg(null);
+            setToastType(null);
+          }, 4000);
+        }}
+        onSetMyJoinStatus={setMyJoinStatus}
+      />
 
       {/* MENU SCREEN */}
       {screen === 'menu' && (
-        <div style={{
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: '24px',
-          zIndex: 1,
-          position: 'relative',
-          padding: '20px'
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <h1 style={{
-              fontFamily: 'Orbitron',
-              fontSize: '72px',
-              fontWeight: 800,
-              letterSpacing: '6px',
-              background: 'linear-gradient(135deg, #00f0ff, #ff007f)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              textShadow: '0 0 30px rgba(0, 240, 255, 0.2)',
-              margin: '10px 0'
-            }}>STAR-SWARM</h1>
-            <p style={{
-              fontSize: '18px',
-              color: 'var(--text-secondary)',
-              letterSpacing: '2px',
-              textTransform: 'uppercase',
-              fontFamily: 'Share Tech Mono'
-            }}>Tactical Grid Space Conquest</p>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            gap: '24px',
-            alignItems: (currentUser || savedGames.length > 0) ? 'stretch' : 'center',
-            flexDirection: (currentUser || savedGames.length > 0) ? 'row' : 'column',
-            justifyContent: 'center',
-            maxWidth: '1100px',
-            width: '100%'
-          }}>
-            {/* Initialize boot panel */}
-            <div style={{
-              width: '450px',
-              padding: '30px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '20px'
-            }} className="glass-panel glass-panel-neon-cyan">
-              <h2 style={{ fontSize: '18px', textAlign: 'center', color: 'var(--accent-cyan)' }}>INITIALIZE SYSTEM BOOT</h2>
-              
-              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={handleStartSkirmishLobby}>
-                SKIRMISH MATCH
-              </button>
-              
-              <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                <strong>RULES OF ENGAGEMENT:</strong>
-                <ul style={{ paddingLeft: '20px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <li>Fog of war covers grid sectors outside sensor range.</li>
-                  <li>Sensor vision is shared across teams.</li>
-                  <li>Enemy ship inventories are concealed behind deflector shields.</li>
-                  <li>Recall dispatched fleets mid-flight. They take the same duration to return.</li>
-                </ul>
-              </div>
-            </div>
-
-            {/* Saved games panel */}
-            {(currentUser || savedGames.length > 0) && (
-              <div style={{
-                flex: '1 1 500px',
-                maxWidth: '600px',
-                padding: '30px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '20px'
-              }} className="glass-panel glass-panel-neon-magenta">
-                <h2 style={{ fontSize: '18px', textAlign: 'center', color: 'var(--accent-magenta)', fontFamily: 'Orbitron' }}>
-                  ACTIVE SAVED SIMULATIONS
-                </h2>
-
-                {/* Search & Filters */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      placeholder="SEARCH BY GAME, PLAYER OR EMAIL..."
-                      value={gameSearchQuery}
-                      onChange={(e) => setGameSearchQuery(e.target.value)}
-                      style={{
-                        flex: 1,
-                        background: 'rgba(0, 0, 0, 0.4)',
-                        border: '1px solid rgba(255, 0, 127, 0.3)',
-                        borderRadius: '4px',
-                        padding: '8px 12px',
-                        color: 'white',
-                        fontSize: '11px',
-                        fontFamily: 'Share Tech Mono',
-                        outline: 'none'
-                      }}
-                    />
-                    <button
-                      className="btn-sci-fi"
-                      style={{ padding: '8px 12px', fontSize: '11px' }}
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                    >
-                      {showAdvancedFilters ? '⚙️ HIDE FILTERS' : '⚙️ FILTERS'}
-                    </button>
-                  </div>
-
-                  {showAdvancedFilters && (
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '10px',
-                      background: 'rgba(0, 0, 0, 0.25)',
-                      padding: '12px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(255, 0, 127, 0.15)'
-                    }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>TURN STATUS</label>
-                        <select
-                          value={gameSearchStatus}
-                          onChange={(e) => setGameSearchStatus(e.target.value)}
-                          style={{
-                            background: '#090514',
-                            border: '1px solid rgba(255, 0, 127, 0.25)',
-                            borderRadius: '4px',
-                            padding: '6px',
-                            color: 'white',
-                            fontSize: '11px',
-                            fontFamily: 'Share Tech Mono',
-                            outline: 'none'
-                          }}
-                        >
-                          <option value="all">ALL SIMULATIONS</option>
-                          <option value="your_turn">YOUR TURN</option>
-                          <option value="waiting">WAITING ON OTHERS</option>
-                          <option value="game_over">GAME OVER</option>
-                        </select>
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>TURN NUMBER</label>
-                        <input
-                          type="number"
-                          placeholder="EXACT TURN..."
-                          value={gameTurnsFilter}
-                          onChange={(e) => setGameTurnsFilter(e.target.value)}
-                          style={{
-                            background: '#090514',
-                            border: '1px solid rgba(255, 0, 127, 0.25)',
-                            borderRadius: '4px',
-                            padding: '6px',
-                            color: 'white',
-                            fontSize: '11px',
-                            fontFamily: 'Share Tech Mono',
-                            outline: 'none'
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>START DATE</label>
-                        <input
-                          type="date"
-                          value={gameStartDate}
-                          onChange={(e) => setGameStartDate(e.target.value)}
-                          style={{
-                            background: '#090514',
-                            border: '1px solid rgba(255, 0, 127, 0.25)',
-                            borderRadius: '4px',
-                            padding: '6px',
-                            color: 'white',
-                            fontSize: '11px',
-                            fontFamily: 'Share Tech Mono',
-                            outline: 'none'
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>END DATE</label>
-                        <input
-                          type="date"
-                          value={gameEndDate}
-                          onChange={(e) => setGameEndDate(e.target.value)}
-                          style={{
-                            background: '#090514',
-                            border: '1px solid rgba(255, 0, 127, 0.25)',
-                            borderRadius: '4px',
-                            padding: '6px',
-                            color: 'white',
-                            fontSize: '11px',
-                            fontFamily: 'Share Tech Mono',
-                            outline: 'none'
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                        <button
-                          className="btn-sci-fi btn-danger"
-                          style={{ padding: '4px 8px', fontSize: '9px' }}
-                          onClick={() => {
-                            setGameSearchQuery('');
-                            setGameSearchStatus('all');
-                            setGameStartDate('');
-                            setGameEndDate('');
-                            setGameTurnsFilter('');
-                          }}
-                        >
-                          RESET FILTERS
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div 
-                  onScroll={(e) => {
-                    const target = e.currentTarget;
-                    const isNearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 25;
-                    if (isNearBottom && !isInfiniteLoading && savedGames.length < totalGamesCount) {
-                      loadGamesList(false);
-                    }
-                  }}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px',
-                    maxHeight: '400px',
-                    overflowY: 'auto',
-                    paddingRight: '6px'
-                  }}
-                >
-                  {savedGames.map((game) => {
-                    const pendingReqs = homePendingRequests[game.id] || [];
-                    const isPanelOpen = joinPanelGameId === game.id;
-                    
-                    let gameStateObj: GameState | null = null;
-                    try {
-                      gameStateObj = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
-                    } catch (e) {
-                      // ignore
-                    }
-
-                    const guestNameVal = localStorage.getItem('starswarm_guest_name') || '';
-                    const userEmail = currentUser?.email || guestNameVal;
-                    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-                    const isLocalOwner = ownedGames.includes(game.id);
-                    const isOwner = game.owner_email 
-                      ? (userEmail && game.owner_email.trim().toLowerCase() === userEmail.trim().toLowerCase())
-                      : (isLocalOwner || !userEmail);
-
-                    // Get free human slots for this game
-                    const freeSlots: { id: number; name: string }[] = (() => {
-                      if (!gameStateObj) return [];
-                      return (gameStateObj.players || []).filter((p: any) => p.type === 'human' && !p.assignedEmail).map((p: any) => ({ id: p.id, name: p.name }));
-                    })();
-
-                    const turnNumber = gameStateObj?.turnNumber || 1;
-                    const totalPlayers = gameStateObj?.players?.length || 0;
-                    const activePlayersCount = gameStateObj ? gameStateObj.players.filter(p => !gameStateObj.playerState[p.id]?.lost).length : 0;
-
-                    return (
-                      <div key={game.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          background: 'rgba(255, 255, 255, 0.02)',
-                          padding: '12px 14px',
-                          borderRadius: '6px',
-                          border: isPanelOpen ? '1px solid rgba(0,240,255,0.35)' : '1px solid rgba(255, 0, 127, 0.15)',
-                          transition: 'border-color 0.2s',
-                        }} className="saved-game-row">
-                          <div style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <div style={{
-                                fontSize: '13px',
-                                fontWeight: 'bold',
-                                color: 'white',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis'
-                              }}>
-                                {game.name}
-                              </div>
-                              {/* Pending join requests badge */}
-                              {pendingReqs.length > 0 && (
-                                <span
-                                  style={{
-                                    background: 'var(--accent-cyan)',
-                                    color: '#000',
-                                    borderRadius: '10px',
-                                    padding: '1px 7px',
-                                    fontSize: '10px',
-                                    fontWeight: 'bold',
-                                    fontFamily: 'Share Tech Mono',
-                                    cursor: 'pointer',
-                                    whiteSpace: 'nowrap',
-                                    flexShrink: 0
-                                  }}
-                                  onClick={(e) => { e.stopPropagation(); setJoinPanelGameId(isPanelOpen ? null : game.id); }}
-                                  title="Click to manage join requests"
-                                >
-                                  📡 {pendingReqs.length} JOIN{pendingReqs.length > 1 ? 'S' : ''}
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }} className="telemetry">
-                              UPDATED: {new Date(game.updated_at).toLocaleString()}
-                            </div>
-
-                            {/* Host and Game details info */}
-                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', fontFamily: 'Share Tech Mono' }}>
-                              HOST: <span style={{ color: 'white' }}>{isOwner ? 'You' : (game.owner_email || 'Unknown')}</span>
-                            </div>
-
-                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', fontFamily: 'Share Tech Mono' }}>
-                              TURN: <span style={{ color: 'white' }}>{turnNumber}</span> · FACTIONS: <span style={{ color: 'white' }}>{activePlayersCount}/{totalPlayers} Active</span>
-                            </div>
-
-                            {/* Factions Inline list */}
-                            {gameStateObj && gameStateObj.players && (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
-                                {gameStateObj.players.map(p => {
-                                  const isPlayerLost = gameStateObj?.playerState[p.id]?.lost;
-                                  const isPlayerMe = userEmail && p.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase();
-                                  return (
-                                    <div
-                                      key={p.id}
-                                      style={{
-                                        fontSize: '9px',
-                                        padding: '1px 5px',
-                                        borderRadius: '3px',
-                                        background: isPlayerLost ? 'rgba(255,255,255,0.02)' : `${p.color}10`,
-                                        border: `1px solid ${isPlayerLost ? 'rgba(255,255,255,0.08)' : p.color}25`,
-                                        color: isPlayerLost ? 'var(--text-muted)' : (isPlayerMe ? 'white' : 'var(--text-secondary)'),
-                                        textDecoration: isPlayerLost ? 'line-through' : 'none',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '3px'
-                                      }}
-                                      title={`${p.name} ${p.assignedEmail ? `(${p.assignedEmail})` : '(Local)'}${isPlayerLost ? ' - DEFEATED' : ''}`}
-                                    >
-                                      <span style={{ display: 'inline-block', width: '5px', height: '5px', borderRadius: '50%', background: isPlayerLost ? '#555' : p.color }} />
-                                      {p.name.split(' ')[0]} {isPlayerMe && '(You)'}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            <div style={{
-                              fontSize: '11px',
-                              color: 'var(--text-secondary)',
-                              marginTop: '8px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}>
-                              <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>STATUS:</span>
-                              <span style={{
-                                color: getGameTurnStatus(game, userEmail || null) === 'YOUR TURN' ? 'var(--accent-green)' : 'var(--accent-yellow)',
-                                fontWeight: 'bold',
-                                fontFamily: 'Share Tech Mono'
-                              }}>
-                                {getGameTurnStatus(game, userEmail || null)}
-                              </span>
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: '90px' }}>
-                            {/* Invite link copy button */}
-                            <button
-                              className="btn-sci-fi"
-                              style={{ padding: '4px 8px', fontSize: '9px' }}
-                              title="Copy invite link"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const inviteUrl = `${window.location.origin}${window.location.pathname}?gameId=${game.invite_code || game.id}`;
-                                copyToClipboard(inviteUrl).then((success) => {
-                                  if (success) {
-                                    showToast('🔗 Invite link copied to clipboard!', 'success', 3000);
-                                  } else {
-                                    window.prompt('Copy invite link manually:', inviteUrl);
-                                  }
-                                }).catch(() => {
-                                  window.prompt('Copy invite link manually:', inviteUrl);
-                                });
-                              }}
-                            >
-                              🔗 INVITE
-                            </button>
-                            {canCancelEndTurnInGame(game) && (
-                              <button
-                                className="btn-sci-fi btn-danger animate-pulse"
-                                style={{ padding: '6px 10px', fontSize: '10px' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  let stateObj: GameState;
-                                  try {
-                                    stateObj = typeof game.game_state === 'string' ? JSON.parse(game.game_state) : game.game_state;
-                                    const userPlayer = stateObj.players.find(p => (userEmail && p.assignedEmail?.trim().toLowerCase() === userEmail.trim().toLowerCase()) || (p.id === 1 && p.isLocal));
-                                    if (userPlayer) {
-                                      handleCancelEndTurnForGame(game.id, userPlayer.id);
-                                    }
-                                  } catch (err) {
-                                    console.error(err);
-                                  }
-                                }}
-                              >
-                                UNDO END
-                              </button>
-                            )}
-                            <button
-                              className="btn-sci-fi"
-                              style={{ padding: '6px 10px', fontSize: '10px' }}
-                              onClick={() => {
-                                loadGameFromId(game.id);
-                                window.history.pushState(null, '', `?gameId=${game.id}`);
-                              }}
-                            >
-                              RESUME
-                            </button>
-                            {isOwner && (
-                              <button
-                                className="btn-sci-fi btn-danger"
-                                style={{ padding: '6px 8px', fontSize: '10px', justifyContent: 'center' }}
-                                onClick={() => setGameToDelete(game)}
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* JOIN REQUESTS EXPAND PANEL */}
-                        {isPanelOpen && pendingReqs.length > 0 && (
-                          <div style={{
-                            background: 'rgba(0,240,255,0.04)',
-                            border: '1px solid rgba(0,240,255,0.2)',
-                            borderRadius: '6px',
-                            padding: '12px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '8px'
-                          }}>
-                            <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px', marginBottom: '2px' }}>
-                              📡 INCOMING JOIN REQUESTS
-                            </div>
-                            {pendingReqs.map(req => (
-                              <div key={req.id} style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                background: 'rgba(255,255,255,0.03)',
-                                borderRadius: '4px',
-                                padding: '8px 10px',
-                                flexWrap: 'wrap'
-                              }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: '11px', color: 'white', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {req.email}
-                                  </div>
-                                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>
-                                    Req #{req.id} · {new Date(req.created_at).toLocaleTimeString()}
-                                  </div>
-                                </div>
-                                {freeSlots.length > 0 ? (
-                                  <>
-                                    <select
-                                      value={joinAssignSlot[req.id] || freeSlots[0].id}
-                                      onChange={e => setJoinAssignSlot(prev => ({ ...prev, [req.id]: parseInt(e.target.value) }))}
-                                      style={{
-                                        background: 'rgba(0,0,0,0.7)',
-                                        border: '1px solid rgba(0,240,255,0.3)',
-                                        color: 'white',
-                                        borderRadius: '4px',
-                                        padding: '3px 6px',
-                                        fontSize: '10px',
-                                        fontFamily: 'Share Tech Mono',
-                                        maxWidth: '120px'
-                                      }}
-                                    >
-                                      {freeSlots.map(slot => (
-                                        <option key={slot.id} value={slot.id}>Slot {slot.id}: {slot.name}</option>
-                                      ))}
-                                    </select>
-                                    <button
-                                      className="btn-sci-fi"
-                                      style={{ padding: '3px 8px', fontSize: '9px' }}
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        const slotId = joinAssignSlot[req.id] || freeSlots[0].id;
-                                        const res = await acceptJoinRequest(game.id, req.id, slotId, req.email);
-                                        if (res.success) {
-                                          showToast(`✅ ${req.email} assigned to slot ${slotId}!`, 'success');
-                                          setHomePendingRequests(h => ({
-                                            ...h,
-                                            [game.id]: (h[game.id] || []).filter(r => r.id !== req.id)
-                                          }));
-                                          if ((homePendingRequests[game.id] || []).length <= 1) {
-                                            setJoinPanelGameId(null);
-                                          }
-                                        } else {
-                                          showError(res.error || 'Failed to assign slot.');
-                                        }
-                                      }}
-                                    >
-                                      ACCEPT
-                                    </button>
-                                  </>
-                                ) : (
-                                  <span style={{ fontSize: '9px', color: 'var(--accent-yellow)', fontFamily: 'Share Tech Mono' }}>No free slots</span>
-                                )}
-                                <button
-                                  className="btn-sci-fi btn-danger"
-                                  style={{ padding: '3px 8px', fontSize: '9px' }}
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    const res = await rejectJoinRequest(game.id, req.id);
-                                    if (res.success) {
-                                      showToast(`❌ Rejected join request from ${req.email}.`, 'warning', 3000);
-                                      setHomePendingRequests(h => ({
-                                        ...h,
-                                        [game.id]: (h[game.id] || []).filter(r => r.id !== req.id)
-                                      }));
-                                      if ((homePendingRequests[game.id] || []).length <= 1) {
-                                        setJoinPanelGameId(null);
-                                      }
-                                    } else {
-                                      showError(res.error || 'Failed to reject request.');
-                                    }
-                                  }}
-                                >
-                                  REJECT
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {isInfiniteLoading && (
-                    <div style={{ textAlign: 'center', color: 'var(--accent-cyan)', fontFamily: 'Share Tech Mono', fontSize: '11px', padding: '10px' }} className="animate-pulse">
-                      📡 DOWNLOADING SIMULATION TELEMETRY...
-                    </div>
-                  )}
-
-                  {savedGames.length === 0 && !isInfiniteLoading && (
-                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', fontSize: '13px', padding: '30px 10px' }}>
-                      NO MATCHING COMMAND SIMULATIONS FOUND
-                    </div>
-                  )}
-
-                  {savedGames.length < totalGamesCount && !isInfiniteLoading && (
-                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', fontSize: '11px', padding: '8px' }}>
-                      SCROLL TO LOAD MORE SIMULATIONS ({savedGames.length} OF {totalGamesCount})
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <MenuScreen
+          currentUser={currentUser}
+          savedGames={savedGames}
+          totalGamesCount={totalGamesCount}
+          gameSearchQuery={gameSearchQuery}
+          setGameSearchQuery={setGameSearchQuery}
+          showAdvancedFilters={showAdvancedFilters}
+          setShowAdvancedFilters={setShowAdvancedFilters}
+          gameSearchStatus={gameSearchStatus}
+          setGameSearchStatus={setGameSearchStatus}
+          gameTurnsFilter={gameTurnsFilter}
+          setGameTurnsFilter={setGameTurnsFilter}
+          gameStartDate={gameStartDate}
+          setGameStartDate={setGameStartDate}
+          gameEndDate={gameEndDate}
+          setGameEndDate={setGameEndDate}
+          loadGamesList={loadGamesList}
+          isInfiniteLoading={isInfiniteLoading}
+          homePendingRequests={homePendingRequests}
+          setHomePendingRequests={setHomePendingRequests}
+          joinPanelGameId={joinPanelGameId}
+          setJoinPanelGameId={setJoinPanelGameId}
+          joinAssignSlot={joinAssignSlot}
+          setJoinAssignSlot={setJoinAssignSlot}
+          handleStartSkirmishLobby={handleStartSkirmishLobby}
+          handleCancelEndTurnForGame={handleCancelEndTurnForGame}
+          loadGameFromId={loadGameFromId}
+          setGameToDelete={setGameToDelete}
+          acceptJoinRequest={acceptJoinRequest}
+          rejectJoinRequest={rejectJoinRequest}
+          showToast={showToast}
+          showError={(msg) => {
+            setAlertMsg(msg);
+            setTimeout(() => setAlertMsg(null), 5000);
+          }}
+        />
       )}
 
-      {/* LOBBY SETUP SCREEN */}
+      {/* LOBBY SCREEN */}
       {screen === 'lobby' && (
-        <div style={{
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1,
-          position: 'relative',
-          padding: '20px'
-        }}>
-          <div style={{
-            width: '650px',
-            padding: '30px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px',
-            maxHeight: '90vh',
-            overflowY: 'auto'
-          }} className="glass-panel glass-panel-neon-cyan">
-            <h2 style={{ fontSize: '24px', color: 'var(--accent-cyan)', textAlign: 'center', fontFamily: 'Orbitron' }}>
-              TACTICAL SETUP LOBBY
-            </h2>
-
-            {/* MAP CONFIG */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>GALAXY MAP SIZE (LIGHTYEARS)</label>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '6px' }}>
-                  <input
-                    type="range"
-                    min="35"
-                    max="90"
-                    value={gridSize}
-                    onChange={(e) => setGridSize(parseInt(e.target.value))}
-                    style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
-                  />
-                  <span className="telemetry" style={{ width: '60px', textAlign: 'right' }}>{gridSize}x{gridSize}</span>
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>STAR CLUSTERS</label>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '6px' }}>
-                  <input
-                    type="range"
-                    min={playersSetup.length}
-                    max="40"
-                    value={systemCount}
-                    onChange={(e) => setSystemCount(parseInt(e.target.value))}
-                    style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
-                  />
-                  <span className="telemetry" style={{ width: '60px', textAlign: 'right' }}>{systemCount} bases</span>
-                </div>
-              </div>
-            </div>
-
-            {/* SEED & VISION CONFIG */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div>
-                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>GALAXY GENERATION SEED</label>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
-                  <input
-                    type="text"
-                    value={gameSeed}
-                    onChange={(e) => setGameSeed(e.target.value)}
-                    placeholder="Enter custom seed"
-                    style={{
-                      flex: 1,
-                      background: 'rgba(0,0,0,0.5)',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      color: 'white',
-                      padding: '6px 10px',
-                      borderRadius: '4px',
-                      fontSize: '13px',
-                      fontFamily: 'Share Tech Mono'
-                    }}
-                  />
-                  <button
-                    className="btn-sci-fi"
-                    onClick={() => setGameSeed(String(Math.floor(Math.random() * 900000) + 100000))}
-                    style={{ padding: '6px 12px', fontSize: '11px' }}
-                  >
-                    RANDOM
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={overrideSightRange}
-                    onChange={(e) => setOverrideSightRange(e.target.checked)}
-                    style={{ accentColor: 'var(--accent-cyan)' }}
-                  />
-                  <span>OVERRIDE STAR SIGHT RANGE</span>
-                </label>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '6px' }}>
-                  <input
-                    type="range"
-                    min="1"
-                    max="20"
-                    step="0.5"
-                    disabled={!overrideSightRange}
-                    value={customSightRange}
-                    onChange={(e) => setCustomSightRange(parseFloat(e.target.value))}
-                    style={{ flex: 1, accentColor: 'var(--accent-cyan)', opacity: overrideSightRange ? 1 : 0.4 }}
-                  />
-                  <span className="telemetry" style={{ width: '60px', textAlign: 'right', opacity: overrideSightRange ? 1 : 0.4 }}>
-                    {customSightRange} LY
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* GAME RULES CONFIG */}
-            <div style={{ background: 'rgba(255,255,255,0.01)', padding: '15px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', display: 'block', marginBottom: '8px' }}>
-                Galaxy Ruleset / Game Mode
-              </label>
-              
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <select
-                  value={selectedModeId}
-                  onChange={(e) => setSelectedModeId(e.target.value)}
-                  style={{
-                    flex: 1,
-                    background: 'rgba(0,0,0,0.8)',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    color: 'white',
-                    padding: '8px 12px',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    fontFamily: 'Orbitron'
-                  }}
-                >
-                  {gameModes.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} {m.isDefault ? '[DEFAULT]' : '[CUSTOM]'}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  className="btn-sci-fi"
-                  onClick={() => {
-                    const currentMode = gameModes.find(m => m.id === selectedModeId);
-                    if (currentMode) {
-                      setEditingRules(JSON.parse(JSON.stringify(currentMode)));
-                      setIsRulesEditorOpen(true);
-                    }
-                  }}
-                  style={{ padding: '8px 10px', fontSize: '11px' }}
-                >
-                  {gameModes.find(m => m.id === selectedModeId)?.isDefault ? 'VIEW' : 'EDIT'}
-                </button>
-
-                <button
-                  className="btn-sci-fi"
-                  onClick={() => {
-                    const currentMode = gameModes.find(m => m.id === selectedModeId);
-                    if (currentMode) {
-                      const copiedRules: GameRules = JSON.parse(JSON.stringify(currentMode));
-                      copiedRules.id = 'custom_' + Date.now();
-                      copiedRules.name = 'Copy of ' + copiedRules.name;
-                      copiedRules.isDefault = false;
-                      
-                      const customs = gameModes.filter(m => !m.isDefault);
-                      const newCustoms = [...customs, copiedRules];
-                      saveCustomModes(newCustoms);
-                      setSelectedModeId(copiedRules.id);
-                    }
-                  }}
-                  style={{ padding: '8px 10px', fontSize: '11px' }}
-                >
-                  COPY
-                </button>
-
-                <button
-                  className="btn-sci-fi"
-                  onClick={handleExportRules}
-                  style={{ padding: '8px 10px', fontSize: '11px' }}
-                >
-                  EXPORT
-                </button>
-
-                <button
-                  className="btn-sci-fi"
-                  onClick={() => {
-                    setImportString('');
-                    setImportError(null);
-                    setIsImportModalOpen(true);
-                  }}
-                  style={{ padding: '8px 10px', fontSize: '11px' }}
-                >
-                  IMPORT
-                </button>
-
-                {!gameModes.find(m => m.id === selectedModeId)?.isDefault && (
-                  <button
-                    className="btn-sci-fi btn-danger"
-                    onClick={() => {
-                      if (confirm('Decommission this custom ruleset?')) {
-                        const customs = gameModes.filter(m => !m.isDefault && m.id !== selectedModeId);
-                        saveCustomModes(customs);
-                        setSelectedModeId('normal');
-                      }
-                    }}
-                    style={{ padding: '8px 10px', fontSize: '11px' }}
-                  >
-                    DELETE
-                  </button>
-                )}
-              </div>
-
-              {/* Mode overview metrics */}
-              {(() => {
-                const currentMode = gameModes.find(m => m.id === selectedModeId);
-                if (!currentMode) return null;
-                return (
-                  <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    <div style={{ fontStyle: 'italic', marginBottom: '6px' }}>{currentMode.description}</div>
-                    <div style={{ display: 'flex', gap: '15px', fontFamily: 'Share Tech Mono', color: 'var(--accent-cyan)' }}>
-                      <span>💳 CREDITS: {currentMode.enableCredits ? 'ENABLED' : 'DISABLED'}</span>
-                      <span>🔧 UPGRADES: {currentMode.enableUpgrades ? 'ENABLED' : 'DISABLED'}</span>
-                      <span>🛰️ AUTO-PROD: {currentMode.nodeProduction.enabled ? `YES (+${currentMode.nodeProduction.shipsPerTurn} ${currentMode.nodeProduction.shipType}/turn)` : 'NO'}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* TURN RESOLUTION STYLE CONFIG */}
-            <div style={{ background: 'rgba(255,255,255,0.01)', padding: '15px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>TURN RESOLUTION STYLE</label>
-              <select
-                id="turn-style-select"
-                value={turnStyle}
-                onChange={(e) => setTurnStyle(e.target.value as 'simultaneous' | 'sequential')}
-                style={{
-                  width: '100%',
-                  background: 'rgba(0,0,0,0.8)',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  color: 'white',
-                  padding: '8px 12px',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  fontFamily: 'Orbitron',
-                  marginTop: '6px'
-                }}
-              >
-                <option value="simultaneous">SIMULTANEOUS — All human players play concurrently; AIs play and rounds resolve at turn end.</option>
-                <option value="sequential">SEQUENTIAL — Factions take turns in order. AIs take their turns instantly in their galactic sequence.</option>
-              </select>
-            </div>
-
-            {/* RECOMMENDED NOTICE */}
-            {recNotice && (
-              <div style={{
-                color: 'var(--accent-green)',
-                fontSize: '11px',
-                textAlign: 'center',
-                fontFamily: 'Share Tech Mono',
-                marginTop: '-10px'
-              }} className="pulse-light">
-                [RECOMMENDATION ARRAY] {recNotice}
-              </div>
-            )}
-
-            <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-
-            {/* PLAYERS LIST CONFIG */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h3 style={{ fontSize: '14px', color: 'var(--text-primary)' }}>FACTIONS & TEAM MAPPING</h3>
-                <span className="telemetry" style={{ fontSize: '11px', color: 'var(--accent-cyan)' }}>
-                  FACTIONS IN SYSTEM: {playersSetup.length} / 8
-                </span>
-              </div>
-                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
-                {playersSetup.map((player, idx) => {
-                  const factionColor = player.color || FACTION_INFO[player.id]?.color || '#ffffff';
-                  return (
-                    <div key={player.id} style={{
-                      display: 'grid',
-                      gridTemplateColumns: '24px 1.5fr 1fr 1fr 90px 2fr 32px',
-                      gap: '8px',
-                      alignItems: 'center',
-                      background: 'rgba(255,255,255,0.02)',
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(255,255,255,0.05)'
-                    }}>
-                      {/* Color indicator */}
-                      <div style={{
-                        width: '12px',
-                        height: '12px',
-                        borderRadius: '50%',
-                        background: factionColor,
-                        boxShadow: `0 0 8px ${factionColor}`,
-                        justifySelf: 'center'
-                      }} />
-                      
-                      {/* Name input */}
-                      <input
-                        type="text"
-                        value={player.name}
-                        onChange={(e) => updatePlayerSetup(idx, 'name', e.target.value)}
-                        style={{
-                          background: 'rgba(0,0,0,0.5)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          color: 'white',
-                          padding: '6px 10px',
-                          borderRadius: '4px',
-                          fontSize: '13px'
-                        }}
-                      />
-                      
-                      {/* Controller selector */}
-                      <select
-                        value={player.type}
-                        onChange={(e) => {
-                          const val = e.target.value as 'human' | 'ai';
-                          setPlayersSetup(prev => {
-                            const copy = [...prev];
-                            copy[idx] = {
-                              ...copy[idx],
-                              type: val,
-                              isLocal: val === 'human',
-                              assignedEmail: val === 'human' ? '' : null
-                            };
-                            return copy;
-                          });
-                        }}
-                        style={{
-                          background: 'rgba(0,0,0,0.8)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          color: 'white',
-                          padding: '6px 10px',
-                          borderRadius: '4px',
-                          fontSize: '13px'
-                        }}
-                        disabled={idx === 0}
-                      >
-                        <option value="human">🌐 HUMAN</option>
-                        <option value="ai">🤖 AI</option>
-                      </select>
- 
-                      {/* Team Selector */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <select
-                          value={player.team}
-                          onChange={(e) => updatePlayerSetup(idx, 'team', parseInt(e.target.value))}
-                          style={{
-                            background: 'rgba(0,0,0,0.8)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            color: 'white',
-                            padding: '6px 8px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            width: '100%'
-                          }}
-                        >
-                          <option value={1}>Team 1</option>
-                          <option value={2}>Team 2</option>
-                          <option value={3}>Team 3</option>
-                          <option value={4}>Team 4</option>
-                        </select>
-                      </div>
-
-                      {/* Local Playable Checkbox */}
-                      {player.type === 'human' ? (
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          <input
-                            type="checkbox"
-                            checked={!!player.isLocal}
-                            disabled={idx === 0}
-                            onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
-                            style={{ accentColor: 'var(--accent-cyan)' }}
-                          />
-                          <span>LOCAL</span>
-                        </label>
-                      ) : (
-                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center' }}>-</div>
-                      )}
-
-                      {/* Assigned Email */}
-                      {player.type === 'human' ? (
-                        <input
-                          type="text"
-                          placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
-                          value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
-                          disabled={idx === 0}
-                          onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
-                          style={{
-                            background: 'rgba(0,0,0,0.5)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            color: 'white',
-                            padding: '6px 8px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            width: '100%',
-                            boxSizing: 'border-box'
-                          }}
-                        />
-                      ) : (
-                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center', fontFamily: 'Share Tech Mono' }}>[AI SYSTEM]</div>
-                      )}
- 
-                      {/* Remove Button */}
-                      {idx > 0 && playersSetup.length > 2 ? (
-                        <button
-                          className="btn-sci-fi btn-danger"
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: '11px',
-                            justifyContent: 'center'
-                          }}
-                          onClick={() => handleRemovePlayer(player.id)}
-                        >
-                          ✕
-                        </button>
-                      ) : (
-                        <div />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Add Faction Button */}
-              {playersSetup.length < 8 && (
-                <button 
-                  className="btn-sci-fi" 
-                  style={{ width: '100%', justifyContent: 'center', fontSize: '13px', borderStyle: 'dashed' }}
-                  onClick={handleAddPlayer}
-                >
-                  + RECRUIT NEW GALAXY FACTION
-                </button>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
-              <button className="btn-sci-fi" onClick={handleStartGame} style={{ flex: 1, justifyContent: 'center' }}>
-                LAUNCH GALAXY SIMULATION
-              </button>
-              <button className="btn-sci-fi btn-danger" onClick={handleReturnToMenu}>
-                RETURN
-              </button>
-            </div>
-          </div>
-        </div>
+        <LobbyScreen
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          systemCount={systemCount}
+          setSystemCount={setSystemCount}
+          gameSeed={gameSeed}
+          setGameSeed={setGameSeed}
+          overrideSightRange={overrideSightRange}
+          setOverrideSightRange={setOverrideSightRange}
+          customSightRange={customSightRange}
+          setCustomSightRange={setCustomSightRange}
+          selectedModeId={selectedModeId}
+          setSelectedModeId={setSelectedModeId}
+          gameModes={gameModes}
+          setEditingRules={setEditingRules}
+          setIsRulesEditorOpen={setIsRulesEditorOpen}
+          saveCustomModes={saveCustomModes}
+          handleExportRules={handleExportRules}
+          setImportString={setImportString}
+          setImportError={setImportError}
+          setIsImportModalOpen={setIsImportModalOpen}
+          turnStyle={turnStyle}
+          setTurnStyle={setTurnStyle}
+          recNotice={recNotice}
+          playersSetup={playersSetup}
+          setPlayersSetup={setPlayersSetup}
+          updatePlayerSetup={updatePlayerSetup}
+          handleRemovePlayer={handleRemovePlayer}
+          handleAddPlayer={handleAddPlayer}
+          handleStartGame={handleStartGame}
+          handleReturnToMenu={handleReturnToMenu}
+          currentUser={currentUser}
+        />
       )}
 
-      {/* GAMEPLAY HUD */}
+      {/* GAME SCREEN */}
       {screen === 'game' && gameState && (
-        <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-          <StarMap
-            gameState={gameState}
-            activePlayerId={activePlayer?.id || 1}
-            selectedSystemId={selectedSystemId}
-            setSelectedSystemId={setSelectedSystemId}
-            selectedFleetId={selectedFleetId}
-            setSelectedFleetId={setSelectedFleetId}
-            onSelectTargetSystem={handleSelectTargetSystem}
-            centerOnCoords={centerOnCoords}
-            targetSystemId={targetSystem?.id || null}
-          />
-          {!isLoadingGame ? (
-            <>
-              <Dashboard
-                gameState={gameState}
-                activePlayerId={activePlayer?.id || 1}
-                selectedSystemId={selectedSystemId}
-                selectedFleetId={selectedFleetId}
-                setSelectedSystemId={setSelectedSystemId}
-                setSelectedFleetId={setSelectedFleetId}
-                onEndTurn={handleEndTurn}
-                onReturnToMenu={handleReturnToMenu}
-                onRenamePlayer={handleRenamePlayer}
-                onCancelEndTurn={handleCancelEndTurn}
-                gameName={activeGameName}
-                onRenameGame={handleRenameGame}
-                onQueueShip={handleQueueShip}
-                onUpgradeSystem={handleUpgradeSystem}
-                onDispatchFleet={handleDispatchFleet}
-                onRecallFleet={handleRecallFleet}
-                onCancelDispatch={handleCancelDispatch}
-                onCancelProduction={handleCancelProduction}
-                onCenterOnCoords={(x, y) => setCenterOnCoords({ x, y, trigger: Date.now() })}
-                targetSystem={targetSystem}
-                setTargetSystem={setTargetSystem}
-                currentUserEmail={currentUser?.email || localStorage.getItem('starswarm_guest_name') || ""}
-                gameOwnerEmail={(() => {
-                  const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
-                  const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-                  const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
-                  if (gameOwnerEmail) return gameOwnerEmail;
-                  if (isLocalOwner && userEmail) return userEmail;
-                  return "";
-                })()}
-                connectedPlayers={connectedPlayers}
-                isPlayerLocalToClient={isPlayerLocalToClient}
-                onClaimFaction={handleClaimFaction}
-                onTogglePlayerLocal={handleTogglePlayerLocal}
-                onAssignPlayerEmail={handleAssignPlayerEmail}
-                soundMuted={soundMuted}
-                onToggleSoundMuted={toggleSoundMuted}
-              />
-
-              {/* IN-GAME JOIN REQUEST PANEL (host only) */}
-              {(() => {
-                const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
-                const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-                const isLocalOwner = activeGameId ? ownedGames.includes(activeGameId) : false;
-                const isOwner = gameOwnerEmail ? (gameOwnerEmail === userEmail) : (isLocalOwner || !userEmail);
-                return isOwner;
-              })() && activeGameId && (homePendingRequests[activeGameId] || []).length > 0 && (() => {
-                const reqs = homePendingRequests[activeGameId] || [];
-                const isPanelOpen = joinPanelGameId === activeGameId;
-                const freeSlots = gameState.players.filter(p => p.type === 'human' && !p.assignedEmail).map(p => ({ id: p.id, name: p.name }));
-                return (
-                  <div style={{
-                    position: 'absolute',
-                    top: '90px',
-                    right: '420px',
-                    zIndex: 50,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                    pointerEvents: 'auto',
-                    maxWidth: '300px'
-                  }}>
-                    <div
-                      style={{
-                        background: 'rgba(0, 240, 255, 0.12)',
-                        border: '1px solid var(--accent-cyan)',
-                        borderRadius: '8px',
-                        padding: '8px 14px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        boxShadow: '0 0 15px rgba(0,240,255,0.2)'
-                      }}
-                      onClick={() => setJoinPanelGameId(isPanelOpen ? null : activeGameId)}
-                    >
-                      <span style={{ fontSize: '16px' }}>📡</span>
-                      <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
-                        {reqs.length} JOIN REQUEST{reqs.length > 1 ? 'S' : ''}
-                      </span>
-                      <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)', transform: isPanelOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
-                    </div>
-
-                    {isPanelOpen && (
-                      <div style={{
-                        background: 'rgba(5, 15, 30, 0.96)',
-                        border: '1px solid rgba(0,240,255,0.25)',
-                        borderRadius: '8px',
-                        padding: '12px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
-                      }}>
-                        {reqs.map(req => (
-                          <div key={req.id} style={{
-                            background: 'rgba(255,255,255,0.03)',
-                            border: '1px solid rgba(255,255,255,0.07)',
-                            borderRadius: '6px',
-                            padding: '8px 10px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '6px'
-                          }}>
-                            <div style={{ fontSize: '11px', color: 'white', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {req.email}
-                            </div>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                              {freeSlots.length > 0 ? (
-                                <>
-                                  <select
-                                    value={joinAssignSlot[req.id] || freeSlots[0].id}
-                                    onChange={e => setJoinAssignSlot(prev => ({ ...prev, [req.id]: parseInt(e.target.value) }))}
-                                    style={{
-                                      flex: 1,
-                                      background: 'rgba(0,0,0,0.7)',
-                                      border: '1px solid rgba(0,240,255,0.3)',
-                                      color: 'white',
-                                      borderRadius: '4px',
-                                      padding: '3px 6px',
-                                      fontSize: '10px',
-                                      fontFamily: 'Share Tech Mono'
-                                    }}
-                                  >
-                                    {freeSlots.map(slot => (
-                                      <option key={slot.id} value={slot.id}>{slot.name}</option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    className="btn-sci-fi"
-                                    style={{ padding: '3px 8px', fontSize: '9px' }}
-                                    onClick={async () => {
-                                      const slotId = joinAssignSlot[req.id] || freeSlots[0].id;
-                                      const res = await acceptJoinRequest(activeGameId, req.id, slotId, req.email);
-                                      if (res.success) {
-                                        showToast(`✅ ${req.email} assigned!`, 'success');
-                                        setHomePendingRequests(h => ({ ...h, [activeGameId]: (h[activeGameId] || []).filter(r => r.id !== req.id) }));
-                                        // Refresh game state so slot assignment is visible
-                                        loadGameFromId(activeGameId);
-                                      } else {
-                                        showError(res.error || 'Failed to assign slot.');
-                                      }
-                                    }}
-                                  >
-                                    ACCEPT
-                                  </button>
-                                </>
-                              ) : (
-                                <span style={{ fontSize: '9px', color: 'var(--accent-yellow)', fontFamily: 'Share Tech Mono' }}>No free slots</span>
-                              )}
-                              <button
-                                className="btn-sci-fi btn-danger"
-                                style={{ padding: '3px 8px', fontSize: '9px' }}
-                                onClick={async () => {
-                                  const res = await rejectJoinRequest(activeGameId, req.id);
-                                  if (res.success) {
-                                    showToast(`❌ Rejected ${req.email}`, 'warning', 3000);
-                                    setHomePendingRequests(h => ({ ...h, [activeGameId]: (h[activeGameId] || []).filter(r => r.id !== req.id) }));
-                                  } else {
-                                    showError(res.error || 'Failed to reject.');
-                                  }
-                                }}
-                              >
-                                REJECT
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </>
-          ) : (
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              backgroundColor: 'rgba(5, 3, 13, 0.45)',
-              backdropFilter: 'blur(6px)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000,
-              color: 'var(--text-primary)',
-              fontFamily: '"Share Tech Mono", monospace'
-            }}>
-              {/* Sci-fi Loading Card */}
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '24px',
-                padding: '40px 50px',
-                borderRadius: '16px',
-                border: '1px solid rgba(0, 240, 255, 0.3)',
-                background: 'rgba(10, 7, 24, 0.85)',
-                boxShadow: '0 0 40px rgba(0, 240, 255, 0.15), inset 0 0 20px rgba(0, 240, 255, 0.05)',
-                maxWidth: '480px',
-                width: '90%',
-                textAlign: 'center'
-              }}>
-                <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto' }}>
-                  {/* Glowing, rotating outer ring */}
-                  <div className="spin-loader" style={{
-                    width: '100%',
-                    height: '100%',
-                    border: '3px solid transparent',
-                    borderTopColor: 'var(--accent-cyan)',
-                    borderBottomColor: 'var(--accent-cyan)',
-                    borderRadius: '50%'
-                  }} />
-                  {/* Inner pulsing star core */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '25%',
-                    left: '25%',
-                    width: '50%',
-                    height: '50%',
-                    backgroundColor: 'var(--accent-magenta)',
-                    borderRadius: '50%',
-                    boxShadow: '0 0 15px var(--accent-magenta)',
-                    animation: 'pulse 1.2s ease-in-out infinite alternate'
-                  }} />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <h2 style={{
-                    letterSpacing: '3px',
-                    color: 'var(--accent-cyan)',
-                    textShadow: '0 0 10px rgba(0, 240, 255, 0.6)',
-                    margin: 0,
-                    fontSize: '20px',
-                    fontWeight: 700
-                  }}>
-                    INITIALIZING SIMULATION
-                  </h2>
-                  <div style={{
-                    fontSize: '13px',
-                    color: 'var(--text-secondary)',
-                    letterSpacing: '1px',
-                    textTransform: 'uppercase'
-                  }} className="pulse-light">
-                    Synchronizing quantum grid nodes...
-                  </div>
-                </div>
-
-                {/* Subtext info */}
-                <div style={{
-                  fontSize: '11px',
-                  color: 'var(--text-muted)',
-                  borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                  paddingTop: '16px',
-                  width: '100%',
-                  lineHeight: '1.6'
-                }}>
-                  Connecting to Star-Swarm core server. Constructing visual grid matrix. Please stand by, Admiral.
-                </div>
-
-                <button 
-                  className="btn-sci-fi btn-danger" 
-                  onClick={handleCancelLoading} 
-                  style={{
-                    marginTop: '8px',
-                    width: '100%',
-                    justifyContent: 'center',
-                    fontWeight: 600,
-                    letterSpacing: '1.5px',
-                    fontSize: '12px'
-                  }}
-                >
-                  ABORT SIMULATION
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <GameScreen
+          gameState={gameState}
+          activePlayer={activePlayer}
+          selectedSystemId={selectedSystemId}
+          setSelectedSystemId={setSelectedSystemId}
+          selectedFleetId={selectedFleetId}
+          setSelectedFleetId={setSelectedFleetId}
+          onSelectTargetSystem={handleSelectTargetSystem}
+          centerOnCoords={centerOnCoords}
+          setCenterOnCoords={setCenterOnCoords}
+          targetSystem={targetSystem}
+          setTargetSystem={setTargetSystem}
+          isLoadingGame={isLoadingGame}
+          onCancelLoading={handleCancelLoading}
+          onEndTurn={handleEndTurn}
+          onReturnToMenu={handleReturnToMenu}
+          onRenamePlayer={handleRenamePlayer}
+          onCancelEndTurn={handleCancelEndTurn}
+          activeGameName={activeGameName}
+          onRenameGame={handleRenameGame}
+          onQueueShip={handleQueueShip}
+          onUpgradeSystem={handleUpgradeSystem}
+          onDispatchFleet={handleDispatchFleet}
+          onRecallFleet={handleRecallFleet}
+          onCancelDispatch={handleCancelDispatch}
+          onCancelProduction={handleCancelProduction}
+          currentUser={currentUser}
+          activeGameId={activeGameId}
+          gameOwnerEmail={gameOwnerEmail || ''}
+          connectedPlayers={connectedPlayers}
+          isPlayerLocalToClient={isPlayerLocalToClient}
+          onClaimFaction={handleClaimFaction}
+          onTogglePlayerLocal={handleTogglePlayerLocal}
+          onAssignPlayerEmail={handleAssignPlayerEmail}
+          soundMuted={soundMuted}
+          onToggleSoundMuted={toggleSoundMuted}
+          homePendingRequests={homePendingRequests}
+          setHomePendingRequests={setHomePendingRequests}
+          joinPanelGameId={joinPanelGameId}
+          setJoinPanelGameId={setJoinPanelGameId}
+          joinAssignSlot={joinAssignSlot}
+          setJoinAssignSlot={setJoinAssignSlot}
+          acceptJoinRequest={acceptJoinRequest}
+          rejectJoinRequest={rejectJoinRequest}
+          loadGameFromId={loadGameFromId}
+          showToast={showToast}
+          showError={(msg) => {
+            setAlertMsg(msg);
+            setTimeout(() => setAlertMsg(null), 5000);
+          }}
+        />
       )}
 
-
-      {/* PASS TURN OVERLAY SCREEN (HOTSEAT CONFIDENTIALITY) */}
-      {screen === 'pass-turn' && nextHumanPlayer && (
-        <div style={{
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 99,
-          position: 'relative'
-        }}>
-          <div style={{
-            width: '450px',
-            padding: '40px',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '24px'
-          }} className="glass-panel glass-panel-neon-magenta pulse-light">
-            <h2 style={{ fontSize: '28px', color: 'var(--accent-magenta)', fontFamily: 'Orbitron', letterSpacing: '2px' }}>
-              HUD SECURE LOCKDOWN
-            </h2>
-            <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-              Sensors and starmaps have been shrouded. Please pass the controller console to:
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'white', marginTop: '12px', textShadow: '0 0 10px rgba(255,255,255,0.3)' }}>
-                {nextHumanPlayer.name}
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-              <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={() => setScreen('game')}>
-                INITIALIZE COMMAND HUD
-              </button>
-              {(() => {
-                const activeHumans = gameState?.players.filter(p => p.type === 'human' && !gameState?.playerState[p.id]?.lost) || [];
-                const endedPlayer = activeHumans.find(p => p.endedTurn);
-                if (endedPlayer) {
-                  return (
-                    <button
-                      className="btn-sci-fi btn-danger"
-                      style={{ justifyContent: 'center' }}
-                      onClick={() => handleCancelEndTurn(endedPlayer.id)}
-                    >
-                      CANCEL END TURN & RETURN TO {endedPlayer.name.toUpperCase()}
-                    </button>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-          </div>
-        </div>
+      {/* PASS TURN SCREEN */}
+      {screen === 'pass-turn' && (
+        <PassTurnScreen
+          nextHumanPlayer={nextHumanPlayer}
+          gameState={gameState}
+          onStartTurn={() => setScreen('game')}
+          onCancelEndTurn={handleCancelEndTurn}
+        />
       )}
 
       {/* GAME OVER SCREEN */}
       {screen === 'game-over' && (
-        <div style={{
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 100,
-          position: 'relative'
-        }}>
-          <div style={{
-            width: '500px',
-            padding: '40px',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '24px'
-          }} className="glass-panel glass-panel-neon-cyan">
-            <h2 style={{ fontSize: '36px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '4px' }}>
-              SIMULATION CONCLUDED
-            </h2>
-            
-            <div style={{ fontSize: '18px', color: 'white', fontWeight: 'bold', textShadow: '0 0 10px rgba(0, 240, 255, 0.4)' }}>
-              {getWinnerInfo()}
-            </div>
-
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
-              The galaxy has stabilized under team authority. All hostile shipyards and fleet registries have been decommissioned or annexed.
-            </p>
-
-            <button className="btn-sci-fi" style={{ justifyContent: 'center' }} onClick={handleReturnToMenu}>
-              RETURN TO COMMAND CENTER
-            </button>
-          </div>
-        </div>
+        <GameOverScreen
+          winnerInfo={getWinnerInfo()}
+          onReturnToMenu={handleReturnToMenu}
+        />
       )}
 
       {/* SETTINGS SCREEN */}
       {screen === 'settings' && (
-        <div style={{
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1,
-          position: 'relative',
-          padding: '20px'
-        }}>
-          <div style={{
-            width: '450px',
-            padding: '30px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-cyan">
-            <h2 style={{ fontSize: '24px', color: 'var(--accent-cyan)', textAlign: 'center', fontFamily: 'Orbitron' }}>
-              COMMANDER SETTINGS
-            </h2>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
-                Global Display Name
-              </label>
-              <input
-                type="text"
-                value={settingsDisplayName}
-                onChange={(e) => setSettingsDisplayName(e.target.value)}
-                placeholder="Enter display name..."
-                style={{
-                  background: 'rgba(0,0,0,0.5)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: 'white',
-                  padding: '10px 14px',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  fontFamily: 'Share Tech Mono'
-                }}
-              />
-            </div>
-
-            {/* Security Section (Change Password) */}
-            {currentUser && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '15px' }}>
-                <h3 style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
-                  Set / Change Password
-                </h3>
-
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono', lineHeight: '1.4' }}>
-                  {currentUser.hasPassword 
-                    ? "Update your account password. This will log you out of all devices/sessions." 
-                    : "Create a password to allow standard email & password login alongside Google Sign-In."}
-                </div>
-
-                <form onSubmit={handleSavePassword} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {passwordStatusMessage && (
-                    <div style={{
-                      background: passwordStatusType === 'success' ? 'rgba(57, 255, 20, 0.1)' : 'rgba(255, 0, 127, 0.1)',
-                      border: passwordStatusType === 'success' ? '1px solid var(--accent-green)' : '1px solid var(--accent-magenta)',
-                      padding: '8px 10px',
-                      borderRadius: '4px',
-                      color: passwordStatusType === 'success' ? 'var(--accent-green)' : 'var(--accent-magenta)',
-                      fontSize: '11px',
-                      fontWeight: 'bold',
-                      fontFamily: 'Share Tech Mono'
-                    }}>
-                      [{passwordStatusType === 'success' ? 'SUCCESS' : 'ERROR'}] {passwordStatusMessage}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
-                      New Password (Min 8 chars)
-                    </label>
-                    <input
-                      type="password"
-                      value={settingsNewPassword}
-                      onChange={(e) => setSettingsNewPassword(e.target.value)}
-                      placeholder="••••••••"
-                      style={{
-                        background: 'rgba(0,0,0,0.5)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: 'white',
-                        padding: '8px 12px',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        fontFamily: 'Share Tech Mono'
-                      }}
-                      required
-                    />
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
-                      Confirm Password
-                    </label>
-                    <input
-                      type="password"
-                      value={settingsConfirmPassword}
-                      onChange={(e) => setSettingsConfirmPassword(e.target.value)}
-                      placeholder="••••••••"
-                      style={{
-                        background: 'rgba(0,0,0,0.5)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: 'white',
-                        padding: '8px 12px',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        fontFamily: 'Share Tech Mono'
-                      }}
-                      required
-                    />
-                  </div>
-
-                  <button className="btn-sci-fi" type="submit" style={{ justifyContent: 'center', marginTop: '5px', fontSize: '12px', padding: '8px 16px' }}>
-                    SET NEW PASSWORD
-                  </button>
-                </form>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
-              <button className="btn-sci-fi" onClick={handleSaveSettings} style={{ flex: 1, justifyContent: 'center' }}>
-                SAVE CHANGES
-              </button>
-              <button className="btn-sci-fi btn-danger" onClick={() => setScreen('menu')}>
-                CANCEL
-              </button>
-            </div>
-          </div>
-        </div>
+        <SettingsScreen
+          currentUser={currentUser}
+          settingsDisplayName={settingsDisplayName}
+          setSettingsDisplayName={setSettingsDisplayName}
+          settingsNewPassword={settingsNewPassword}
+          setSettingsNewPassword={setSettingsNewPassword}
+          settingsConfirmPassword={settingsConfirmPassword}
+          setSettingsConfirmPassword={setSettingsConfirmPassword}
+          passwordStatusMessage={passwordStatusMessage}
+          setPasswordStatusMessage={setPasswordStatusMessage}
+          passwordStatusType={passwordStatusType}
+          setPasswordStatusType={setPasswordStatusType}
+          onSaveSettings={handleSaveSettings}
+          onCancel={() => {
+            setPasswordStatusMessage(null);
+            setPasswordStatusType(null);
+            setSettingsNewPassword('');
+            setSettingsConfirmPassword('');
+            setScreen('menu');
+          }}
+          onShowError={(msg) => {
+            setAlertMsg(msg);
+            setTimeout(() => setAlertMsg(null), 5000);
+          }}
+          onShowToast={showToast}
+          onSetCurrentUser={setCurrentUser}
+          onNavigateMenu={() => setScreen('menu')}
+        />
       )}
 
-      {/* AUTHENTICATION INPUT MODAL OVERLAY */}
-      {isAuthModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(5, 3, 13, 0.85)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            width: '420px',
-            padding: '30px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-cyan">
-            
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '18px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
-                {authTab === 'signin' ? 'ESTABLISH COMMAND LINK' : 'CREATE COMMAND PROTOCOL'}
-              </h2>
-              <button 
-                className="btn-sci-fi btn-danger" 
-                style={{ padding: '4px 8px', fontSize: '10px' }} 
-                onClick={() => setIsAuthModalOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-              <button 
-                style={{
-                  flex: 1,
-                  background: 'none',
-                  border: 'none',
-                  borderBottom: authTab === 'signin' ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-                  color: authTab === 'signin' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                  padding: '10px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontFamily: 'Outfit'
-                }}
-                onClick={() => { setAuthTab('signin'); setAuthError(null); setAuthSuccess(null); }}
-              >
-                SIGN IN
-              </button>
-              <button 
-                style={{
-                  flex: 1,
-                  background: 'none',
-                  border: 'none',
-                  borderBottom: authTab === 'register' ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-                  color: authTab === 'register' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                  padding: '10px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontFamily: 'Outfit'
-                }}
-                onClick={() => { setAuthTab('register'); setAuthError(null); setAuthSuccess(null); }}
-              >
-                REGISTER
-              </button>
-            </div>
-
-            {/* Notification messages */}
-            {authError && (
-              <div style={{
-                background: 'rgba(255, 0, 127, 0.1)',
-                border: '1px solid var(--accent-magenta)',
-                padding: '10px',
-                borderRadius: '6px',
-                color: 'var(--accent-magenta)',
-                fontSize: '12px',
-                fontWeight: 'bold',
-                fontFamily: 'Share Tech Mono'
-              }}>
-                [ERROR] {authError}
-              </div>
-            )}
-            {authSuccess && (
-              <div style={{
-                background: 'rgba(57, 255, 20, 0.1)',
-                border: '1px solid var(--accent-green)',
-                padding: '10px',
-                borderRadius: '6px',
-                color: 'var(--accent-green)',
-                fontSize: '12px',
-                fontWeight: 'bold',
-                fontFamily: 'Share Tech Mono'
-              }}>
-                [SUCCESS] {authSuccess}
-              </div>
-            )}
-
-            {/* Auth Form */}
-            <form onSubmit={authTab === 'signin' ? handleLogin : handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>COMMANDER EMAIL</label>
-                <input 
-                  type="email" 
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  style={{
-                    width: '100%',
-                    background: 'rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: 'white',
-                    padding: '10px',
-                    borderRadius: '6px',
-                    fontSize: '14px',
-                    fontFamily: 'Outfit'
-                  }}
-                  placeholder="name@domain.com"
-                  required
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>ACCESS PASSWORD (MIN 8 CHARS)</label>
-                <input 
-                  type="password" 
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  style={{
-                    width: '100%',
-                    background: 'rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: 'white',
-                    padding: '10px',
-                    borderRadius: '6px',
-                    fontSize: '14px',
-                    fontFamily: 'Outfit'
-                  }}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-
-              <button className="btn-sci-fi" type="submit" style={{ justifyContent: 'center', marginTop: '5px' }}>
-                {authTab === 'signin' ? 'INITIATE CONNECTION' : 'CREATE PROTOCOL'}
-              </button>
-            </form>
-
-            {isGoogleAuthEnabled && (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '5px 0' }}>
-                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>OR</span>
-                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-                </div>
-
-                {/* Google Sign-in button */}
-                <button 
-                  className="btn-sci-fi" 
-                  type="button"
-                  style={{ 
-                    justifyContent: 'center', 
-                    background: 'rgba(255, 255, 255, 0.05)', 
-                    borderColor: 'rgba(255, 255, 255, 0.2)',
-                    color: 'white',
-                    width: '100%',
-                    marginTop: '5px'
-                  }}
-                  onClick={() => {
-                    const stateParam = window.location.search;
-                    window.location.href = `/api/auth/google?state=${encodeURIComponent(stateParam)}`;
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 18 18" style={{ marginRight: '8px' }}>
-                    <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.25-.16-1.84H9v3.47h4.84c-.21 1.12-.84 2.07-1.79 2.7v2.24h2.9c1.69-1.55 2.69-3.85 2.69-6.57z"/>
-                    <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.23l-2.9-2.24c-.8.54-1.84.87-3.06.87-2.35 0-4.34-1.58-5.05-3.72H.95v2.3C2.43 15.89 5.5 18 9 18z"/>
-                    <path fill="#FBBC05" d="M3.95 10.68c-.18-.54-.28-1.12-.28-1.68s.1-1.14.28-1.68V5.02H.95C.34 6.22 0 7.57 0 9s.34 2.78.95 3.98l3-2.3z"/>
-                    <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.47.89 11.43 0 9 0 5.5 0 2.43 2.11.95 5.02l3 2.3c.71-2.14 2.7-3.72 5.05-3.72z"/>
-                  </svg>
-                  SIGN IN WITH GOOGLE
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+      {/* TERMS OF SERVICE SCREEN */}
+      {screen === 'terms' && (
+        <>
+          <div className="space-bg" />
+          <TermsOfService onBack={() => setScreen('menu')} />
+        </>
       )}
 
-      {/* DECOMMISSION CONFIRMATION MODAL */}
-      {gameToDelete && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(5, 3, 13, 0.85)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1001
-        }}>
-          <div style={{
-            width: '400px',
-            padding: '30px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-magenta">
-            <h2 style={{ fontSize: '18px', color: 'var(--accent-magenta)', fontFamily: 'Orbitron', letterSpacing: '1px', textAlign: 'center' }}>
-              DECOMMISSION SIMULATION?
-            </h2>
-            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: '1.5' }}>
-              Are you sure you want to delete the simulation record for:
-              <div style={{ color: 'white', fontWeight: 'bold', margin: '10px 0', fontSize: '14px' }}>
-                {gameToDelete.name}
-              </div>
-              This action is irreversible. All ship registries, star grid data, and fleets will be decommissioned.
-            </div>
-            <div style={{ display: 'flex', gap: '15px' }}>
-              <button 
-                className="btn-sci-fi btn-danger" 
-                style={{ flex: 1, justifyContent: 'center' }} 
-                onClick={async () => {
-                  const delRes = await deleteGame(gameToDelete.id);
-                  if (delRes.success) {
-                    const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
-                    const updatedOwned = ownedGames.filter((id: string) => id !== gameToDelete.id);
-                    localStorage.setItem('starswarm_owned_games', JSON.stringify(updatedOwned));
-                    loadGamesList();
-                  } else {
-                    showError(delRes.error || 'Failed to delete game.');
-                  }
-                  setGameToDelete(null);
-                }}
-              >
-                DECOMMISSION
-              </button>
-              <button 
-                className="btn-sci-fi" 
-                style={{ flex: 1, justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }} 
-                onClick={() => setGameToDelete(null)}
-              >
-                CANCEL
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* PRIVACY POLICY SCREEN */}
+      {screen === 'privacy' && (
+        <>
+          <div className="space-bg" />
+          <PrivacyPolicy onBack={() => setScreen('menu')} />
+        </>
       )}
 
-      {isRulesEditorOpen && editingRules && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(5, 10, 20, 0.95)',
-          backdropFilter: 'blur(10px)',
-          zIndex: 1000,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          pointerEvents: 'auto',
-          color: 'white',
-          fontFamily: 'Share Tech Mono'
-        }}>
-          <div style={{
-            width: '800px',
-            padding: '30px',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-cyan">
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontFamily: 'Orbitron', color: 'var(--accent-cyan)', margin: 0 }}>
-                {editingRules.isDefault ? 'GALACTIC RULESET PROTOCOLS (READ-ONLY)' : 'CUSTOM RULESET DESIGNER'}
-              </h2>
-              <button className="btn-sci-fi btn-danger" onClick={() => { setIsRulesEditorOpen(false); setEditingRules(null); }}>✕</button>
-            </div>
-
-            {editingRules.isDefault && (
-              <div style={{ padding: '8px 12px', background: 'rgba(0, 240, 255, 0.05)', border: '1px solid rgba(0, 240, 255, 0.2)', color: 'var(--accent-cyan)', borderRadius: '4px', fontSize: '12px' }}>
-                [NOTICE] Default rulesets cannot be modified. To customize these rules, return to the lobby and click &quot;COPY MODE&quot; to create a custom template.
-              </div>
-            )}
-
-            {editorErrors.length > 0 && (
-              <div style={{ padding: '10px', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {editorErrors.map((err, idx) => (
-                  <div key={idx} style={{ color: 'var(--accent-magenta)', fontSize: '12px', fontWeight: 'bold' }}>• {err}</div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-              {/* Left Column - Meta & Toggles */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RULESET NAME</label>
-                  <input
-                    type="text"
-                    disabled={editingRules.isDefault}
-                    value={editingRules.name}
-                    onChange={(e) => setEditingRules({ ...editingRules, name: e.target.value })}
-                    style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '6px 10px', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>DESCRIPTION</label>
-                  <textarea
-                    disabled={editingRules.isDefault}
-                    value={editingRules.description}
-                    onChange={(e) => setEditingRules({ ...editingRules, description: e.target.value })}
-                    style={{ width: '100%', height: '50px', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box', resize: 'none' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      disabled={editingRules.isDefault}
-                      checked={editingRules.enableCredits}
-                      onChange={(e) => setEditingRules({ ...editingRules, enableCredits: e.target.checked })}
-                      style={{ accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span>ENABLE CREDITS / ECONOMY</span>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      disabled={editingRules.isDefault}
-                      checked={editingRules.enableUpgrades}
-                      onChange={(e) => setEditingRules({ ...editingRules, enableUpgrades: e.target.checked })}
-                      style={{ accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span>ENABLE BASE & TECH UPGRADES</span>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      disabled={editingRules.isDefault}
-                      checked={editingRules.captureRequiresColonyShip}
-                      onChange={(e) => setEditingRules({ ...editingRules, captureRequiresColonyShip: e.target.checked })}
-                      style={{ accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span>ANNEXING NEUTRALS REQUIRES COLONY SHIP</span>
-                  </label>
-                </div>
-
-                {/* Economic / Turn settings */}
-                {editingRules.enableCredits && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', background: 'rgba(0, 240, 255, 0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(0, 240, 255, 0.08)' }}>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>START CREDITS</label>
-                      <input
-                        type="number"
-                        disabled={editingRules.isDefault}
-                        value={editingRules.startingResources}
-                        onChange={(e) => setEditingRules({ ...editingRules, startingResources: parseInt(e.target.value) || 0 })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>BASE INCOME</label>
-                      <input
-                        type="number"
-                        disabled={editingRules.isDefault}
-                        value={editingRules.resourcesPerTurn.base}
-                        onChange={(e) => setEditingRules({
-                          ...editingRules,
-                          resourcesPerTurn: { ...editingRules.resourcesPerTurn, base: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>RAND INCOME</label>
-                      <input
-                        type="number"
-                        disabled={editingRules.isDefault}
-                        value={editingRules.resourcesPerTurn.randomAdd}
-                        onChange={(e) => setEditingRules({
-                          ...editingRules,
-                          resourcesPerTurn: { ...editingRules.resourcesPerTurn, randomAdd: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Right Column - Map/Production settings */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(57, 255, 20, 0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(57, 255, 20, 0.08)' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      disabled={editingRules.isDefault}
-                      checked={editingRules.nodeProduction.enabled}
-                      onChange={(e) => setEditingRules({
-                        ...editingRules,
-                        nodeProduction: { ...editingRules.nodeProduction, enabled: e.target.checked }
-                      })}
-                      style={{ accentColor: 'var(--accent-green)' }}
-                    />
-                    <span>ENABLE AUTOMATED NODE PRODUCTION</span>
-                  </label>
-
-                  {editingRules.nodeProduction.enabled && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
-                      <div>
-                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SHIPS PER TURN</label>
-                        <input
-                          type="number"
-                          disabled={editingRules.isDefault}
-                          value={editingRules.nodeProduction.shipsPerTurn}
-                          onChange={(e) => setEditingRules({
-                            ...editingRules,
-                            nodeProduction: { ...editingRules.nodeProduction, shipsPerTurn: parseInt(e.target.value) || 0 }
-                          })}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SHIP TYPE</label>
-                        <select
-                          disabled={editingRules.isDefault}
-                          value={editingRules.nodeProduction.shipType}
-                          onChange={(e) => setEditingRules({
-                            ...editingRules,
-                            nodeProduction: { ...editingRules.nodeProduction, shipType: e.target.value }
-                          })}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                        >
-                          {Object.keys(editingRules.ships).map(type => (
-                            <option key={type} value={type}>{type}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>BASE STAR SIGHT RANGE</label>
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <input
-                      type="range"
-                      min="1"
-                      max="20"
-                      step="0.5"
-                      disabled={editingRules.isDefault}
-                      value={editingRules.starSightRange ?? 6.0}
-                      onChange={(e) => setEditingRules({ ...editingRules, starSightRange: parseFloat(e.target.value) || 6.0 })}
-                      style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span className="telemetry" style={{ width: '50px', textAlign: 'right', fontSize: '12px' }}>{editingRules.starSightRange ?? 6.0} LY</span>
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>NEUTRAL DEFENSE COMPOSITION</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr', gap: '8px' }}>
-                    <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MIN SHIPS</label>
-                      <input
-                        type="number"
-                        disabled={editingRules.isDefault}
-                        value={editingRules.neutralStartingShipsRange.min}
-                        onChange={(e) => setEditingRules({
-                          ...editingRules,
-                          neutralStartingShipsRange: { ...editingRules.neutralStartingShipsRange, min: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MAX SHIPS</label>
-                      <input
-                        type="number"
-                        disabled={editingRules.isDefault}
-                        value={editingRules.neutralStartingShipsRange.max}
-                        onChange={(e) => setEditingRules({
-                          ...editingRules,
-                          neutralStartingShipsRange: { ...editingRules.neutralStartingShipsRange, max: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>SHIP TYPE</label>
-                      <select
-                        disabled={editingRules.isDefault}
-                        value={editingRules.neutralStartingShipsRange.type}
-                        onChange={(e) => setEditingRules({
-                          ...editingRules,
-                          neutralStartingShipsRange: { ...editingRules.neutralStartingShipsRange, type: e.target.value }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      >
-                        {Object.keys(editingRules.ships).map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>FACTION STARTING FLEETS</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                    {Object.keys(editingRules.ships).map(type => (
-                      <div key={type}>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{type.toUpperCase()}</label>
-                        <input
-                          type="number"
-                          disabled={editingRules.isDefault}
-                          value={editingRules.startingShips[type] || 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
-                            setEditingRules({
-                              ...editingRules,
-                              startingShips: { ...editingRules.startingShips, [type]: val }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Ship Types Manager Section */}
-            <div style={{ background: 'rgba(255,255,255,0.01)', padding: '15px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '14px', color: 'var(--accent-cyan)', margin: 0 }}>SHIP TYPES SCHEMA</h3>
-                {!editingRules.isDefault && (
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      placeholder="e.g. Destroyer"
-                      value={newShipTypeKey}
-                      onChange={(e) => setNewShipTypeKey(e.target.value)}
-                      style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px' }}
-                    />
-                    <button
-                      className="btn-sci-fi"
-                      style={{ padding: '4px 10px', fontSize: '11px' }}
-                      onClick={() => {
-                        const key = newShipTypeKey.trim();
-                        if (key && !editingRules.ships[key]) {
-                          const updatedShips = {
-                            ...editingRules.ships,
-                            [key]: {
-                              name: key,
-                              cost: 10,
-                              speed: 3.0,
-                              hp: 1,
-                              attack: 1,
-                              hitChance: 0.5,
-                              description: 'Custom combat hull.'
-                            }
-                          };
-                          setEditingRules({
-                            ...editingRules,
-                            ships: updatedShips,
-                            startingShips: { ...editingRules.startingShips, [key]: 0 }
-                          });
-                          setNewShipTypeKey('');
-                        }
-                      }}
-                    >
-                      ADD HULL TYPE
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
-                {Object.entries(editingRules.ships).map(([type, shipDef]) => (
-                  <div key={type} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ color: 'white', fontSize: '13px' }}>Hull Protocol: {type}</strong>
-                      {!editingRules.isDefault && Object.keys(editingRules.ships).length > 1 && (
-                        <button
-                          className="btn-sci-fi btn-danger"
-                          style={{ padding: '2px 6px', fontSize: '10px' }}
-                          onClick={() => {
-                            const newShips = { ...editingRules.ships };
-                            delete newShips[type];
-                            const newStarting = { ...editingRules.startingShips };
-                            delete newStarting[type];
-                            
-                            // Adjust production or neutral type if they were set to deleted ship
-                            let newProdType = editingRules.nodeProduction.shipType;
-                            if (newProdType === type) {
-                              newProdType = Object.keys(newShips)[0] || '';
-                            }
-                            let newNeutralType = editingRules.neutralStartingShipsRange.type;
-                            if (newNeutralType === type) {
-                              newNeutralType = Object.keys(newShips)[0] || '';
-                            }
-
-                            setEditingRules({
-                              ...editingRules,
-                              ships: newShips,
-                              startingShips: newStarting,
-                              nodeProduction: { ...editingRules.nodeProduction, shipType: newProdType },
-                              neutralStartingShipsRange: { ...editingRules.neutralStartingShipsRange, type: newNeutralType }
-                            });
-                          }}
-                        >
-                          REMOVE
-                        </button>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
-                      {editingRules.enableCredits && (
-                        <div>
-                          <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>BUILD COST</label>
-                          <input
-                            type="number"
-                            disabled={editingRules.isDefault}
-                            value={shipDef.cost}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value) || 0;
-                              setEditingRules({
-                                ...editingRules,
-                                ships: {
-                                  ...editingRules.ships,
-                                  [type]: { ...shipDef, cost: val }
-                                }
-                              });
-                            }}
-                            style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>SPEED (LY/T)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          disabled={editingRules.isDefault}
-                          value={shipDef.speed}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0.1;
-                            setEditingRules({
-                              ...editingRules,
-                              ships: {
-                                ...editingRules.ships,
-                                  [type]: { ...shipDef, speed: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>STRUCTURAL HP</label>
-                        <input
-                          type="number"
-                          disabled={editingRules.isDefault}
-                          value={shipDef.hp}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 1;
-                            setEditingRules({
-                              ...editingRules,
-                              ships: {
-                                ...editingRules.ships,
-                                  [type]: { ...shipDef, hp: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>WEAPON DAMAGE</label>
-                        <input
-                          type="number"
-                          disabled={editingRules.isDefault}
-                          value={shipDef.attack}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
-                            setEditingRules({
-                              ...editingRules,
-                              ships: {
-                                ...editingRules.ships,
-                                  [type]: { ...shipDef, attack: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>HIT CHANCE (0-1)</label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          disabled={editingRules.isDefault}
-                          value={shipDef.hitChance}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0.0;
-                            setEditingRules({
-                              ...editingRules,
-                              ships: {
-                                ...editingRules.ships,
-                                  [type]: { ...shipDef, hitChance: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
-              {!editingRules.isDefault && (
-                <button className="btn-sci-fi" onClick={handleSaveRules} style={{ flex: 1, justifyContent: 'center' }}>
-                  SAVE PROTOCOLS
-                </button>
-              )}
-              <button className="btn-sci-fi btn-danger" onClick={() => { setIsRulesEditorOpen(false); setEditingRules(null); }} style={{ flex: editingRules.isDefault ? 1 : 0, justifyContent: 'center' }}>
-                CLOSE
-              </button>
-            </div>
-
-          </div>
-        </div>
+      {/* FOOTER */}
+      {(screen === 'menu' || screen === 'lobby' || screen === 'game-over' || screen === 'settings' || screen === 'terms' || screen === 'privacy') && (
+        <Footer onNavigate={(target) => setScreen(target as any)} />
       )}
 
-      {/* IMPORT CODE STRING ENTRY MODAL */}
-      {isImportModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(5, 10, 20, 0.85)',
-          backdropFilter: 'blur(8px)',
-          zIndex: 1000,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          pointerEvents: 'auto',
-          color: 'white',
-          fontFamily: 'Share Tech Mono'
-        }}>
-          <div style={{
-            width: '500px',
-            padding: '30px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-cyan">
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontFamily: 'Orbitron', color: 'var(--accent-cyan)', margin: 0, fontSize: '18px' }}>
-                IMPORT RULESET PROTOCOL
-              </h2>
-              <button className="btn-sci-fi btn-danger" onClick={() => setIsImportModalOpen(false)}>✕</button>
-            </div>
+      {/* AUTH MODAL */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        authTab={authTab}
+        authEmail={authEmail}
+        authPassword={authPassword}
+        authError={authError}
+        authSuccess={authSuccess}
+        isGoogleAuthEnabled={isGoogleAuthEnabled}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSetTab={setAuthTab}
+        onSetEmail={setAuthEmail}
+        onSetPassword={setAuthPassword}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+      />
 
-            {importError && (
-              <div style={{ padding: '10px', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '4px', color: 'var(--accent-magenta)', fontSize: '12px', fontWeight: 'bold' }}>
-                {importError}
-              </div>
-            )}
+      {/* DELETE GAME MODAL */}
+      <DeleteGameModal
+        gameToDelete={gameToDelete}
+        onClose={() => setGameToDelete(null)}
+        onDeleted={() => loadGamesList(true)}
+        onShowError={(msg) => {
+          setAlertMsg(msg);
+          setTimeout(() => setAlertMsg(null), 5000);
+        }}
+      />
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PASTE CONFIGURATION STRING</label>
-              <textarea
-                value={importString}
-                onChange={(e) => setImportString(e.target.value)}
-                placeholder="Paste SS-RULES-V1-... string here"
-                style={{
-                  width: '100%',
-                  height: '150px',
-                  background: 'rgba(0,0,0,0.5)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: 'white',
-                  padding: '10px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  boxSizing: 'border-box',
-                  resize: 'none'
-                }}
-              />
-            </div>
+      {/* RULES EDITOR MODAL */}
+      <RulesEditorModal
+        isOpen={isRulesEditorOpen}
+        editingRules={editingRules}
+        editorErrors={editorErrors}
+        newShipTypeKey={newShipTypeKey}
+        onSetEditingRules={setEditingRules}
+        onSetNewShipTypeKey={setNewShipTypeKey}
+        onSaveRules={handleSaveRules}
+        onClose={() => {
+          setIsRulesEditorOpen(false);
+          setEditingRules(null);
+        }}
+      />
 
-            <div style={{ display: 'flex', gap: '15px' }}>
-              <button className="btn-sci-fi" onClick={handleProcessImport} style={{ flex: 1, justifyContent: 'center' }}>
-                DECRYPT & PREVIEW
-              </button>
-              <button className="btn-sci-fi btn-danger" onClick={() => setIsImportModalOpen(false)}>
-                CANCEL
-              </button>
-            </div>
+      {/* IMPORT RULES MODAL */}
+      <ImportRulesModal
+        isOpen={isImportModalOpen}
+        importString={importString}
+        importError={importError}
+        onSetImportString={setImportString}
+        onProcessImport={handleProcessImport}
+        onClose={() => setIsImportModalOpen(false)}
+      />
 
-          </div>
-        </div>
-      )}
-
-      {/* IMPORT & MIGRATION PREVIEW MODAL */}
-      {isImportPreviewOpen && importRulesPreview && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(5, 10, 20, 0.95)',
-          backdropFilter: 'blur(10px)',
-          zIndex: 1000,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          pointerEvents: 'auto',
-          color: 'white',
-          fontFamily: 'Share Tech Mono'
-        }}>
-          <div style={{
-            width: '800px',
-            padding: '30px',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }} className="glass-panel glass-panel-neon-magenta">
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontFamily: 'Orbitron', color: 'var(--accent-magenta)', margin: 0 }}>
-                RULESET IMPORT PREVIEW & MIGRATION
-              </h2>
-              <button className="btn-sci-fi btn-danger" onClick={() => { setIsImportPreviewOpen(false); setImportRulesPreview(null); }}>✕</button>
-            </div>
-
-            {importOriginalVersion !== null && importOriginalVersion !== 1 ? (
-              <div style={{
-                padding: '12px',
-                background: 'rgba(255, 170, 0, 0.1)',
-                border: '1px solid rgba(255, 170, 0, 0.3)',
-                color: '#ffaa00',
-                borderRadius: '6px',
-                fontSize: '12px',
-                lineHeight: '1.5'
-              }}>
-                <strong>⚠️ SCHEMA MIGRATION DETECTED:</strong> This ruleset is version <strong>V{importOriginalVersion}</strong>, but the current options configuration is <strong>V1</strong>. Missing or deprecated properties have been automatically migrated to default values. Please review the settings below before importing.
-              </div>
-            ) : (
-              <div style={{
-                padding: '8px 12px',
-                background: 'rgba(0, 240, 255, 0.05)',
-                border: '1px solid rgba(0, 240, 255, 0.2)',
-                color: 'var(--accent-cyan)',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}>
-                ✓ Version Check OK (Ruleset Version V1 verified). Ready to import.
-              </div>
-            )}
-
-            {importPreviewErrors.length > 0 && (
-              <div style={{ padding: '10px', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid rgba(255, 0, 127, 0.3)', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {importPreviewErrors.map((err, idx) => (
-                  <div key={idx} style={{ color: 'var(--accent-magenta)', fontSize: '12px', fontWeight: 'bold' }}>• {err}</div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-              {/* Left Column */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RULESET NAME</label>
-                  <input
-                    type="text"
-                    value={importRulesPreview.name}
-                    onChange={(e) => setImportRulesPreview({ ...importRulesPreview, name: e.target.value })}
-                    style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '6px 10px', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>DESCRIPTION</label>
-                  <textarea
-                    value={importRulesPreview.description}
-                    onChange={(e) => setImportRulesPreview({ ...importRulesPreview, description: e.target.value })}
-                    style={{ width: '100%', height: '50px', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box', resize: 'none' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={importRulesPreview.enableCredits}
-                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, enableCredits: e.target.checked })}
-                      style={{ accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span>ENABLE CREDITS / ECONOMY</span>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={importRulesPreview.enableUpgrades}
-                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, enableUpgrades: e.target.checked })}
-                      style={{ accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span>ENABLE BASE & TECH UPGRADES</span>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={importRulesPreview.captureRequiresColonyShip}
-                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, captureRequiresColonyShip: e.target.checked })}
-                      style={{ accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span>ANNEXING NEUTRALS REQUIRES COLONY SHIP</span>
-                  </label>
-                </div>
-
-                {importRulesPreview.enableCredits && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', background: 'rgba(0, 240, 255, 0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(0, 240, 255, 0.08)' }}>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>START CREDITS</label>
-                      <input
-                        type="number"
-                        value={importRulesPreview.startingResources}
-                        onChange={(e) => setImportRulesPreview({ ...importRulesPreview, startingResources: parseInt(e.target.value) || 0 })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>BASE INCOME</label>
-                      <input
-                        type="number"
-                        value={importRulesPreview.resourcesPerTurn.base}
-                        onChange={(e) => setImportRulesPreview({
-                          ...importRulesPreview,
-                          resourcesPerTurn: { ...importRulesPreview.resourcesPerTurn, base: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>RAND INCOME</label>
-                      <input
-                        type="number"
-                        value={importRulesPreview.resourcesPerTurn.randomAdd}
-                        onChange={(e) => setImportRulesPreview({
-                          ...importRulesPreview,
-                          resourcesPerTurn: { ...importRulesPreview.resourcesPerTurn, randomAdd: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Right Column */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(57, 255, 20, 0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(57, 255, 20, 0.08)' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={importRulesPreview.nodeProduction.enabled}
-                      onChange={(e) => setImportRulesPreview({
-                        ...importRulesPreview,
-                        nodeProduction: { ...importRulesPreview.nodeProduction, enabled: e.target.checked }
-                      })}
-                      style={{ accentColor: 'var(--accent-green)' }}
-                    />
-                    <span>ENABLE AUTOMATED NODE PRODUCTION</span>
-                  </label>
-
-                  {importRulesPreview.nodeProduction.enabled && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
-                      <div>
-                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SHIPS PER TURN</label>
-                        <input
-                          type="number"
-                          value={importRulesPreview.nodeProduction.shipsPerTurn}
-                          onChange={(e) => setImportRulesPreview({
-                            ...importRulesPreview,
-                            nodeProduction: { ...importRulesPreview.nodeProduction, shipsPerTurn: parseInt(e.target.value) || 0 }
-                          })}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SHIP TYPE</label>
-                        <select
-                          value={importRulesPreview.nodeProduction.shipType}
-                          onChange={(e) => setImportRulesPreview({
-                            ...importRulesPreview,
-                            nodeProduction: { ...importRulesPreview.nodeProduction, shipType: e.target.value }
-                          })}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                        >
-                          {Object.keys(importRulesPreview.ships).map(type => (
-                            <option key={type} value={type}>{type}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>BASE STAR SIGHT RANGE</label>
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <input
-                      type="range"
-                      min="1"
-                      max="20"
-                      step="0.5"
-                      value={importRulesPreview.starSightRange ?? 6.0}
-                      onChange={(e) => setImportRulesPreview({ ...importRulesPreview, starSightRange: parseFloat(e.target.value) || 6.0 })}
-                      style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
-                    />
-                    <span className="telemetry" style={{ width: '50px', textAlign: 'right', fontSize: '12px' }}>{importRulesPreview.starSightRange ?? 6.0} LY</span>
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>NEUTRAL DEFENSE COMPOSITION</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr', gap: '8px' }}>
-                    <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MIN SHIPS</label>
-                      <input
-                        type="number"
-                        value={importRulesPreview.neutralStartingShipsRange.min}
-                        onChange={(e) => setImportRulesPreview({
-                          ...importRulesPreview,
-                          neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, min: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MAX SHIPS</label>
-                      <input
-                        type="number"
-                        value={importRulesPreview.neutralStartingShipsRange.max}
-                        onChange={(e) => setImportRulesPreview({
-                          ...importRulesPreview,
-                          neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, max: parseInt(e.target.value) || 0 }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>SHIP TYPE</label>
-                      <select
-                        value={importRulesPreview.neutralStartingShipsRange.type}
-                        onChange={(e) => setImportRulesPreview({
-                          ...importRulesPreview,
-                          neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, type: e.target.value }
-                        })}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                      >
-                        {Object.keys(importRulesPreview.ships).map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: 'var(--text-primary)' }}>FACTION STARTING FLEETS</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                    {Object.keys(importRulesPreview.ships).map(type => (
-                      <div key={type}>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{type.toUpperCase()}</label>
-                        <input
-                          type="number"
-                          value={importRulesPreview.startingShips[type] || 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
-                            setImportRulesPreview({
-                              ...importRulesPreview,
-                              startingShips: { ...importRulesPreview.startingShips, [type]: val }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Ship Types Manager Section for Import Preview */}
-            <div style={{ background: 'rgba(255,255,255,0.01)', padding: '15px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '14px', color: 'var(--accent-magenta)', margin: 0 }}>SHIP TYPES SCHEMA</h3>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="e.g. Destroyer"
-                    value={newImportShipTypeKey}
-                    onChange={(e) => setNewImportShipTypeKey(e.target.value)}
-                    style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px' }}
-                  />
-                  <button
-                    className="btn-sci-fi"
-                    style={{ padding: '4px 10px', fontSize: '11px' }}
-                    onClick={() => {
-                      const key = newImportShipTypeKey.trim();
-                      if (key && !importRulesPreview.ships[key]) {
-                        const updatedShips = {
-                          ...importRulesPreview.ships,
-                          [key]: {
-                            name: key,
-                            cost: 10,
-                            speed: 3.0,
-                            hp: 1,
-                            attack: 1,
-                            hitChance: 0.5,
-                            description: 'Custom combat hull.'
-                          }
-                        };
-                        setImportRulesPreview({
-                          ...importRulesPreview,
-                          ships: updatedShips,
-                          startingShips: { ...importRulesPreview.startingShips, [key]: 0 }
-                        });
-                        setNewImportShipTypeKey('');
-                      }
-                    }}
-                  >
-                    ADD HULL TYPE
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                {Object.entries(importRulesPreview.ships).map(([type, shipDef]) => (
-                  <div key={type} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ color: 'white', fontSize: '13px' }}>Hull Protocol: {type}</strong>
-                      {Object.keys(importRulesPreview.ships).length > 1 && (
-                        <button
-                          className="btn-sci-fi btn-danger"
-                          style={{ padding: '2px 6px', fontSize: '10px' }}
-                          onClick={() => {
-                            const newShips = { ...importRulesPreview.ships };
-                            delete newShips[type];
-                            const newStarting = { ...importRulesPreview.startingShips };
-                            delete newStarting[type];
-                            
-                            let newProdType = importRulesPreview.nodeProduction.shipType;
-                            if (newProdType === type) {
-                              newProdType = Object.keys(newShips)[0] || '';
-                            }
-                            let newNeutralType = importRulesPreview.neutralStartingShipsRange.type;
-                            if (newNeutralType === type) {
-                              newNeutralType = Object.keys(newShips)[0] || '';
-                            }
-
-                            setImportRulesPreview({
-                              ...importRulesPreview,
-                              ships: newShips,
-                              startingShips: newStarting,
-                              nodeProduction: { ...importRulesPreview.nodeProduction, shipType: newProdType },
-                              neutralStartingShipsRange: { ...importRulesPreview.neutralStartingShipsRange, type: newNeutralType }
-                            });
-                          }}
-                        >
-                          REMOVE
-                        </button>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
-                      {importRulesPreview.enableCredits && (
-                        <div>
-                          <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>BUILD COST</label>
-                          <input
-                            type="number"
-                            value={shipDef.cost}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value) || 0;
-                              setImportRulesPreview({
-                                ...importRulesPreview,
-                                ships: {
-                                  ...importRulesPreview.ships,
-                                  [type]: { ...shipDef, cost: val }
-                                }
-                              });
-                            }}
-                            style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>SPEED (LY/T)</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={shipDef.speed}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0.1;
-                            setImportRulesPreview({
-                              ...importRulesPreview,
-                              ships: {
-                                ...importRulesPreview.ships,
-                                [type]: { ...shipDef, speed: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>STRUCTURAL HP</label>
-                        <input
-                          type="number"
-                          value={shipDef.hp}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 1;
-                            setImportRulesPreview({
-                              ...importRulesPreview,
-                              ships: {
-                                ...importRulesPreview.ships,
-                                [type]: { ...shipDef, hp: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>WEAPON DAMAGE</label>
-                        <input
-                          type="number"
-                          value={shipDef.attack}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
-                            setImportRulesPreview({
-                              ...importRulesPreview,
-                              ships: {
-                                ...importRulesPreview.ships,
-                                [type]: { ...shipDef, attack: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '9px', color: 'var(--text-muted)' }}>HIT CHANCE (0-1)</label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          value={shipDef.hitChance}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0.0;
-                            setImportRulesPreview({
-                              ...importRulesPreview,
-                              ships: {
-                                ...importRulesPreview.ships,
-                                [type]: { ...shipDef, hitChance: val }
-                              }
-                            });
-                          }}
-                          style={{ width: '100%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '4px 6px', borderRadius: '4px', fontSize: '11px', boxSizing: 'border-box' }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
-              <button className="btn-sci-fi" onClick={handleConfirmImport} style={{ flex: 1, justifyContent: 'center' }}>
-                CONFIRM IMPORT PROTOCOL
-              </button>
-              <button className="btn-sci-fi btn-danger" onClick={() => { setIsImportPreviewOpen(false); setImportRulesPreview(null); }}>
-                CANCEL
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
+      {/* IMPORT PREVIEW MODAL */}
+      <ImportPreviewModal
+        isOpen={isImportPreviewOpen}
+        importRulesPreview={importRulesPreview}
+        importOriginalVersion={importOriginalVersion}
+        importPreviewErrors={importPreviewErrors}
+        newImportShipTypeKey={newImportShipTypeKey}
+        onSetImportRulesPreview={setImportRulesPreview}
+        onSetNewImportShipTypeKey={setNewImportShipTypeKey}
+        onConfirmImport={handleConfirmImport}
+        onClose={() => {
+          setIsImportPreviewOpen(false);
+          setImportRulesPreview(null);
+        }}
+      />
     </div>
   );
 }
