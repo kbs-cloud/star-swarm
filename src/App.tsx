@@ -24,7 +24,8 @@ import {
   UserAccount,
   recordGameStats,
   initCSRF,
-  checkSession
+  checkSession,
+  pollAuth
 } from './game/auth';
 import {
   listGames,
@@ -33,16 +34,14 @@ import {
   updateGame,
   GameMetadata,
   updateGameName,
-
   updateSettings,
-
-
   fetchPendingJoins,
   checkMyJoinStatus,
   acceptJoinRequest,
   rejectJoinRequest,
   JoinRequest,
-  performGameAction
+  performGameAction,
+  syncGames
 } from './game/gameApi';
 
 
@@ -472,6 +471,7 @@ export default function App() {
 
   // Google OAuth State
   const [isGoogleAuthEnabled, setIsGoogleAuthEnabled] = useState(false);
+  const [isGooglePolling, setIsGooglePolling] = useState(false);
 
   const [settingsDisplayName, setSettingsDisplayName] = useState<string>('');
   const [compactMode, setCompactMode] = useState<boolean>(() => {
@@ -480,6 +480,18 @@ export default function App() {
   const [settingsCompactMode, setSettingsCompactMode] = useState<boolean>(compactMode);
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 768 || window.innerHeight <= 480);
   const [activeMobileTab, setActiveMobileTab] = useState<'map' | 'empire' | 'tactics'>('map');
+
+  const [playOnline, setPlayOnline] = useState<boolean>(() => localStorage.getItem('starswarm_play_online') === 'true');
+  const [serverUrl, setServerUrl] = useState<string>(() => localStorage.getItem('starswarm_server_url') || 'http://localhost:3001');
+
+  const [settingsPlayOnline, setSettingsPlayOnline] = useState<boolean>(playOnline);
+  const [settingsServerUrl, setSettingsServerUrl] = useState<string>(serverUrl);
+
+  // Sync settings when connection state changes
+  React.useEffect(() => {
+    setSettingsPlayOnline(playOnline);
+    setSettingsServerUrl(serverUrl);
+  }, [playOnline, serverUrl]);
 
   // Sync settingsCompactMode when settings screen opens or compactMode changes
   React.useEffect(() => {
@@ -789,7 +801,34 @@ export default function App() {
     localStorage.setItem('starswarm_display_name', settingsDisplayName);
     localStorage.setItem('starswarm_compact_mode', settingsCompactMode ? 'true' : 'false');
     setCompactMode(settingsCompactMode);
-    if (currentUser) {
+
+    if (isElectronMode()) {
+      const prevPlayOnline = localStorage.getItem('starswarm_play_online') === 'true';
+      const playOnlineChanged = prevPlayOnline !== settingsPlayOnline;
+
+      localStorage.setItem('starswarm_play_online', settingsPlayOnline ? 'true' : 'false');
+      localStorage.setItem('starswarm_server_url', settingsServerUrl);
+      setPlayOnline(settingsPlayOnline);
+      setServerUrl(settingsServerUrl);
+
+      if (settingsPlayOnline) {
+        showToast('Initializing connection to server...', 'info');
+        await initCSRF();
+        const user = await checkSession();
+        if (user) {
+          setCurrentUser(user);
+          showToast(`Connected to server as ${user.displayName || user.email}`, 'success');
+        } else {
+          setCurrentUser(null);
+          showToast('Connected to server as Guest.', 'info');
+        }
+      } else if (playOnlineChanged) {
+        setCurrentUser(null);
+        showToast('Switched to Local/Offline Mode.', 'info');
+      }
+    }
+
+    if (currentUser && (!isElectronMode() || settingsPlayOnline)) {
       const res = await updateSettings(settingsDisplayName);
       if (res.success) {
         const updatedUser = await checkSession();
@@ -801,7 +840,82 @@ export default function App() {
         return;
       }
     }
+    loadGamesList(true);
     setScreen('menu');
+  };
+
+  const handleToggleOnline = async () => {
+    const nextValue = !playOnline;
+    localStorage.setItem('starswarm_play_online', nextValue ? 'true' : 'false');
+    setPlayOnline(nextValue);
+
+    if (nextValue) {
+      showToast('Connecting to Server Mode...', 'info');
+      await initCSRF();
+      const user = await checkSession();
+      if (user) {
+        setCurrentUser(user);
+        showToast(`Connected to server as ${user.displayName || user.email}`, 'success');
+      } else {
+        setCurrentUser(null);
+        showToast('Online Mode active. Sign in to host or play multiplayer.', 'info');
+      }
+    } else {
+      setCurrentUser(null);
+      showToast('Switched to Local/Offline Mode.', 'info');
+    }
+    loadGamesList(true);
+  };
+
+  const handleSyncMatches = async () => {
+    if (!playOnline) {
+      showToast('Sync requires Online Mode to be active.', 'warning');
+      return;
+    }
+
+    const userEmail = currentUser?.email || localStorage.getItem('starswarm_guest_name');
+    if (!userEmail) {
+      showToast('Sign in or set guest name to sync matches.', 'warning');
+      return;
+    }
+
+    setIsLoadingGame(true);
+    try {
+      const localGamesStr = localStorage.getItem('starswarm_local_games');
+      const localGames = localGamesStr ? JSON.parse(localGamesStr) : [];
+
+      const res = await syncGames(localGames);
+      if (res.success && res.localUpdates) {
+        const currentLocalGames = [...localGames];
+        const localUpdates = res.localUpdates;
+
+        localUpdates.forEach((serverGame: any) => {
+          const index = currentLocalGames.findIndex(g => g.id === serverGame.id);
+          if (index !== -1) {
+            currentLocalGames[index] = serverGame;
+          } else {
+            currentLocalGames.push(serverGame);
+          }
+
+          const ownedGames = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+          if (!ownedGames.includes(serverGame.id)) {
+            ownedGames.push(serverGame.id);
+            localStorage.setItem('starswarm_owned_games', JSON.stringify(ownedGames));
+          }
+        });
+
+        localStorage.setItem('starswarm_local_games', JSON.stringify(currentLocalGames));
+        showToast('🌌 Sync complete! Matches are in sync.', 'success');
+        loadGamesList(true);
+      } else {
+        showError(res.error || 'Failed to sync matches.');
+      }
+    } catch (err) {
+      console.error(err);
+      showError('Sync operation failed.');
+    } finally {
+      setIsLoadingGame(false);
+    }
   };
 
 
@@ -863,6 +977,8 @@ export default function App() {
 
   // Initialize CSRF and restore session cookie on mount
   React.useEffect(() => {
+    localStorage.removeItem('starswarm_auth_pending_token');
+
     const bootstrap = async () => {
       await initCSRF();
       const user = await checkSession();
@@ -883,6 +999,77 @@ export default function App() {
       }
     };
     bootstrap();
+  }, []);
+
+  // Poll for Google Sign-in completion in Electron
+  React.useEffect(() => {
+    if (!isElectronMode()) return;
+
+    let active = true;
+    let pollInterval: NodeJS.Timeout | null = null;
+    let currentPollingToken: string | null = null;
+
+    const startPolling = (token: string) => {
+      if (currentPollingToken === token) return;
+      currentPollingToken = token;
+      setIsGooglePolling(true);
+
+      if (pollInterval) clearInterval(pollInterval);
+
+      pollInterval = setInterval(async () => {
+        if (!active) return;
+        try {
+          const response = await pollAuth(token);
+          if (response.status === 'success' && response.sessionId) {
+            if (pollInterval) clearInterval(pollInterval);
+            localStorage.removeItem('starswarm_auth_pending_token');
+            localStorage.setItem('starswarm_session_id', response.sessionId);
+            setIsGooglePolling(false);
+            showToast('Authenticating command link...', 'info');
+            const user = await checkSession();
+            if (user) {
+              setCurrentUser(user);
+              showToast(`Connected as ${user.displayName || user.email}`, 'success');
+            } else {
+              showError('Failed to establish user session.');
+            }
+          } else if (response.status === 'error') {
+            if (pollInterval) clearInterval(pollInterval);
+            localStorage.removeItem('starswarm_auth_pending_token');
+            setIsGooglePolling(false);
+            showError(`Google Sign-in failed: ${response.error || 'unknown error'}`);
+          }
+        } catch (e) {
+          console.error('Error polling auth status:', e);
+        }
+      }, 2000);
+    };
+
+    const checkPendingToken = () => {
+      const pendingToken = localStorage.getItem('starswarm_auth_pending_token');
+      if (pendingToken) {
+        startPolling(pendingToken);
+      } else {
+        if (currentPollingToken) {
+          currentPollingToken = null;
+          setIsGooglePolling(false);
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+        }
+      }
+    };
+
+    // Check periodically for token since storage events don't fire within the same window
+    const tokenCheckInterval = setInterval(checkPendingToken, 1000);
+    checkPendingToken();
+
+    return () => {
+      active = false;
+      if (pollInterval) clearInterval(pollInterval);
+      clearInterval(tokenCheckInterval);
+    };
   }, []);
 
   // When user logs in after a URL with gameId was already set (e.g. auth modal appeared),
@@ -1566,6 +1753,12 @@ export default function App() {
     }
   };
 
+  const handleCancelGooglePoll = () => {
+    localStorage.removeItem('starswarm_auth_pending_token');
+    setIsGooglePolling(false);
+    showToast('Google Sign-in connection request cancelled.', 'info');
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -2033,6 +2226,10 @@ export default function App() {
             setTimeout(() => setAlertMsg(null), 5000);
           }}
           compactMode={compactMode || isMobile}
+          isOnline={playOnline}
+          onToggleOnline={handleToggleOnline}
+          onSyncMatches={handleSyncMatches}
+          serverUrl={serverUrl}
         />
       )}
 
@@ -2070,6 +2267,7 @@ export default function App() {
           handleStartGame={handleStartGame}
           handleReturnToMenu={handleReturnToMenu}
           currentUser={currentUser}
+          playOnline={playOnline}
         />
       )}
 
@@ -2182,6 +2380,10 @@ export default function App() {
           settingsCompactMode={settingsCompactMode}
           setSettingsCompactMode={setSettingsCompactMode}
           isMobile={isMobile}
+          settingsPlayOnline={settingsPlayOnline}
+          setSettingsPlayOnline={setSettingsPlayOnline}
+          settingsServerUrl={settingsServerUrl}
+          setSettingsServerUrl={setSettingsServerUrl}
         />
       )}
 
@@ -2241,6 +2443,8 @@ export default function App() {
         authError={authError}
         authSuccess={authSuccess}
         isGoogleAuthEnabled={isGoogleAuthEnabled}
+        isGooglePolling={isGooglePolling}
+        onCancelGooglePoll={handleCancelGooglePoll}
         onClose={() => setIsAuthModalOpen(false)}
         onSetTab={setAuthTab}
         onSetEmail={setAuthEmail}

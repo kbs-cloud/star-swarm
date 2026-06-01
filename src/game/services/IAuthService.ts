@@ -9,4 +9,5 @@ export interface IAuthService {
   getCurrentUser(): UserAccount | null;
   logoutUser(): Promise<void>;
   recordGameStats(email: string, won: boolean): Promise<void>;
+  pollAuth(token: string): Promise<{ status: 'pending' | 'success' | 'error'; sessionId?: string; error?: string }>;
 }

@@ -366,4 +366,8 @@ export class LocalGameService implements IGameService {
       return { success: false, error: result.reason || 'Action failed.' };
     }
   }
+
+  public async syncGames(localGames: any[]): Promise<{ success: boolean; localUpdates?: any[]; error?: string }> {
+    return { success: false, error: 'Sync only available when connected to a server.' };
+  }
 }

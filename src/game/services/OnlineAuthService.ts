@@ -1,5 +1,8 @@
 import { IAuthService } from './IAuthService';
 import { UserAccount } from '../auth';
+import { apiFetch } from './apiFetch';
+
+const fetch = apiFetch;
 
 export class OnlineAuthService implements IAuthService {
   private currentUserCache: UserAccount | null = null;
@@ -13,12 +16,17 @@ export class OnlineAuthService implements IAuthService {
   }
 
   private getHeaders(): Record<string, string> {
-    const csrfToken = this.getCookie('csrf_token') || '';
+    const cookieToken = this.getCookie('csrf_token') || '';
+    const csrfToken = cookieToken || localStorage.getItem('starswarm_csrf_token') || '';
+    const sessionId = localStorage.getItem('starswarm_session_id') || '';
     const guestName = localStorage.getItem('starswarm_guest_name') || '';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-CSRF-Token': csrfToken
     };
+    if (sessionId) {
+      headers['X-Session-ID'] = sessionId;
+    }
     if (guestName) {
       headers['X-Guest-Name'] = guestName;
       headers['X-Guest-Email'] = guestName;
@@ -28,7 +36,13 @@ export class OnlineAuthService implements IAuthService {
 
   public async initCSRF(): Promise<void> {
     try {
-      await fetch('/api/csrf-init');
+      const response = await fetch('/api/csrf-init');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.csrfToken) {
+          localStorage.setItem('starswarm_csrf_token', data.csrfToken);
+        }
+      }
     } catch (e) {
       console.error('Failed to initialize CSRF token handshake:', e);
     }
@@ -64,6 +78,9 @@ export class OnlineAuthService implements IAuthService {
       const data = await response.json();
       if (response.ok && data.success) {
         this.currentUserCache = data.user;
+        if (data.sessionId) {
+          localStorage.setItem('starswarm_session_id', data.sessionId);
+        }
         return { success: true, message: 'Logged in successfully.', user: data.user };
       } else {
         return { success: false, message: data.error || 'Invalid credentials.' };
@@ -88,11 +105,16 @@ export class OnlineAuthService implements IAuthService {
 
   public async checkSession(): Promise<UserAccount | null> {
     try {
-      const response = await fetch('/api/me');
+      const response = await fetch('/api/me', {
+        headers: this.getHeaders()
+      });
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
           this.currentUserCache = data.user;
+          if (data.sessionId) {
+            localStorage.setItem('starswarm_session_id', data.sessionId);
+          }
           return data.user;
         }
       }
@@ -117,6 +139,21 @@ export class OnlineAuthService implements IAuthService {
       console.error('Logout request failed:', e);
     }
     this.currentUserCache = null;
+    localStorage.removeItem('starswarm_session_id');
+  }
+
+  public async pollAuth(token: string): Promise<{ status: 'pending' | 'success' | 'error'; sessionId?: string; error?: string }> {
+    try {
+      const response = await fetch(`/api/auth/poll?token=${encodeURIComponent(token)}`, {
+        headers: this.getHeaders()
+      });
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (e) {
+      console.error('Failed to poll auth status:', e);
+    }
+    return { status: 'pending' };
   }
 
   public async recordGameStats(_email: string, won: boolean): Promise<void> {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -23,6 +23,22 @@ function createWindow() {
   // Always load static assets directly from the filesystem (no server/hosting needed)
   win.loadFile(path.join(__dirname, 'dist', 'index.html')).catch((err) => {
     console.error('Failed to load local built assets:', err);
+  });
+
+  // Intercept navigation to external URLs (like OAuth redirects) and open in default OS browser
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://')) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  // Intercept window.open calls to open in default OS browser
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (!url.startsWith('file://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
   });
 }
 

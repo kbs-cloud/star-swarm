@@ -765,4 +765,135 @@ test.describe('Star-Swarm E2E Tests', () => {
     const homePlanetHeading = page.locator(`h2:has-text("${homePlanet.name}")`);
     await expect(homePlanetHeading).toBeVisible();
   });
+
+  test('should support local/remote match synchronization in guest and authenticated modes', async ({ page }) => {
+    page.on('request', request => {
+      if (request.url().includes(':3001/api')) {
+        console.log('>> REQUEST:', request.method(), request.url(), request.headers());
+      }
+    });
+    page.on('requestfailed', request => {
+      if (request.url().includes(':3001/api')) {
+        console.log('!! REQUEST FAILED:', request.url(), request.failure()?.errorText);
+      }
+    });
+    page.on('response', async response => {
+      if (response.url().includes(':3001/api')) {
+        try {
+          console.log('<< RESPONSE:', response.url(), response.status(), await response.json());
+        } catch (e) {}
+      }
+    });
+
+    const guestGameId = `test-sync-guest-game-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const authGameId = `test-sync-auth-game-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const guestGameName = `GuestSyncGame-${guestGameId}`;
+    const authGameName = `AuthSyncGame-${authGameId}`;
+
+    // 1. Setup Electron mode environment and local storage for GUEST sync
+    await page.goto('http://127.0.0.1:8080/');
+
+    // Inject Electron mock environment
+    await page.addInitScript(([gId, gName]) => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: navigator.userAgent + ' electron',
+        configurable: true
+      });
+      localStorage.setItem('starswarm_guest_name', 'GuestSyncTester');
+      localStorage.setItem('starswarm_play_online', 'true');
+      localStorage.setItem('starswarm_server_url', 'http://127.0.0.1:3001');
+
+      const mockGame = {
+        id: gId,
+        name: gName,
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        game_state: JSON.stringify({
+          id: gId,
+          turnNumber: 1,
+          players: [{ id: 1, name: 'Vanguard Swarm', type: 'human' }],
+          playerState: { 1: { id: 1, name: 'Vanguard Swarm', lost: false } },
+          systems: [],
+          fleets: []
+        })
+      };
+      localStorage.setItem('starswarm_local_games', JSON.stringify([mockGame]));
+      localStorage.setItem('starswarm_owned_games', JSON.stringify([mockGame.id]));
+    }, [guestGameId, guestGameName]);
+
+    // Reload page to apply mocked localStorage and Electron state
+    await page.reload();
+
+    // Verify Sector Link banner shows ONLINE and the Sync Simulations button is visible
+    const sectorLinkText = page.locator('text=SECTOR LINK: ONLINE');
+    await expect(sectorLinkText).toBeVisible();
+
+    const syncBtn = page.locator('button:has-text("Sync Simulations")');
+    await expect(syncBtn).toBeVisible();
+
+    // Click Sync button and listen for response/toast
+    await syncBtn.click();
+    await expect(page.locator('text=Sync complete!')).toBeVisible();
+
+    // Verify the game shows in the games list
+    const gameListItem = page.locator(`text=${guestGameName}`);
+    await expect(gameListItem).toBeVisible();
+
+    // 2. Setup GUEST-to-AUTHENTICATED upgrade test
+    const randomEmail = `sync-auth-${Date.now()}-${Math.random().toString(36).substring(2, 9)}@example.com`;
+    const establishLinkBtn = page.locator('button:has-text("ESTABLISH COMMAND LINK")');
+    await establishLinkBtn.click();
+
+    const registerTab = page.locator('button:has-text("REGISTER")');
+    await registerTab.click();
+
+    const emailInput = page.locator('input[type="email"]');
+    const passwordInput = page.locator('input[type="password"]');
+    await emailInput.fill(randomEmail);
+    await passwordInput.fill('password123');
+
+    const submitBtn = page.locator('button[type="submit"]');
+    await submitBtn.click();
+
+    await expect(page.locator('text=Account created successfully')).toBeVisible();
+
+    await emailInput.fill(randomEmail);
+    await passwordInput.fill('password123');
+    await submitBtn.click();
+
+    // Verify logged in
+    await expect(page.locator(`text=${randomEmail}`)).toBeVisible();
+
+    // Create a new local game while logged in
+    await page.evaluate(([aId, aName]) => {
+      const mockAuthGame = {
+        id: aId,
+        name: aName,
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        game_state: JSON.stringify({
+          id: aId,
+          turnNumber: 1,
+          players: [{ id: 1, name: 'Vanguard Swarm', type: 'human' }],
+          playerState: { 1: { id: 1, name: 'Vanguard Swarm', lost: false } },
+          systems: [],
+          fleets: []
+        })
+      };
+      const existingGames = JSON.parse(localStorage.getItem('starswarm_local_games') || '[]');
+      existingGames.push(mockAuthGame);
+      localStorage.setItem('starswarm_local_games', JSON.stringify(existingGames));
+
+      const existingOwned = JSON.parse(localStorage.getItem('starswarm_owned_games') || '[]');
+      existingOwned.push(mockAuthGame.id);
+      localStorage.setItem('starswarm_owned_games', JSON.stringify(existingOwned));
+    }, [authGameId, authGameName]);
+
+    // Run sync again
+    await syncBtn.click();
+    await expect(page.locator('text=Sync complete!')).toBeVisible();
+
+    // Verify the authenticated game is displayed (the guest game is filtered out for this user)
+    await expect(page.locator(`text=${authGameName}`)).toBeVisible();
+  });
 });

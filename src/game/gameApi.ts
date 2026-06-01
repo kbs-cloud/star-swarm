@@ -164,3 +164,7 @@ export async function performGameAction(
 ): Promise<{ success: boolean; gameState?: GameState; error?: string }> {
   return gameService.performGameAction(gameId, action, playerId, params);
 }
+
+export async function syncGames(localGames: any[]): Promise<{ success: boolean; localUpdates?: any[]; error?: string }> {
+  return gameService.syncGames(localGames);
+}

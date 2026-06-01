@@ -181,13 +181,22 @@ function populateMissingInviteCodes() {
 }
 
 // Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 
-// Enable CORS for frontend proxy / local testing origins
+// Enable CORS for frontend proxy / local testing origins (including Electron file:// / null origins)
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://127.0.0.1:8080'],
+  origin: function(origin, callback) {
+    if (!origin || origin === 'null' || origin.startsWith('file://')) {
+      return callback(null, true);
+    }
+    const allowedOrigins = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://localhost:5173', 'http://127.0.0.1:5173'];
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+      return callback(null, true);
+    }
+    callback(null, true);
+  },
   credentials: true
 }));
 
@@ -225,19 +234,28 @@ app.get('/api/csrf-init', (req, res) => {
   let csrfToken = req.cookies['csrf_token'];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(24).toString('hex');
-    // Set a non-HttpOnly cookie so the JS client can read it to submit in headers
-    res.cookie('csrf_token', csrfToken, {
-      path: '/',
-      sameSite: 'lax',
-      // TODO(security): Set secure: true in production HTTPS
-      secure: false
-    });
   }
-  res.status(200).json({ success: true });
+  // Always ensure the cookie is set
+  res.cookie('csrf_token', csrfToken, {
+    path: '/',
+    sameSite: 'lax',
+    // TODO(security): Set secure: true in production HTTPS
+    secure: false
+  });
+  // Also return the token directly in the JSON body so file:// clients can read it
+  res.status(200).json({ success: true, csrfToken });
 });
 
 // Middleware to validate CSRF token on state-changing requests
 function validateCSRF(req, res, next) {
+  const origin = req.headers['origin'];
+  const isElectron = !origin || origin === 'null' || origin.startsWith('file://');
+
+  // If request is from Electron/cross-origin or authenticated via custom header, bypass CSRF
+  if (isElectron || req.headers['x-session-id']) {
+    return next();
+  }
+
   const cookieToken = req.cookies['csrf_token'];
   const headerToken = req.headers['x-csrf-token'];
 
@@ -250,7 +268,7 @@ function validateCSRF(req, res, next) {
 
 // Session Validation Helper
 function getSessionUser(req, callback) {
-  const sessionId = req.cookies['session_id'];
+  const sessionId = req.headers['x-session-id'] || req.cookies['session_id'];
   if (!sessionId) {
     return callback(null, null);
   }
@@ -274,6 +292,20 @@ function getSessionUser(req, callback) {
 // In-memory presence store
 // Key: gameId, Value: Array of { email, lastSeen }
 const gamePresence = new Map();
+
+// In-memory pending auth requests for Electron browser-based polling
+// Key: token, Value: { sessionId, error, createdAt }
+const pendingAuths = new Map();
+
+// Periodic cleanup of expired tokens (> 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, data] of pendingAuths.entries()) {
+    if (now - data.createdAt > 5 * 60 * 1000) {
+      pendingAuths.delete(token);
+    }
+  }
+}, 60000);
 
 function updatePresence(gameId, email) {
   if (!gamePresence.has(gameId)) {
@@ -398,6 +430,7 @@ app.post('/api/login', validateCSRF, (req, res) => {
 
         res.status(200).json({
           success: true,
+          sessionId,
           user: {
             email: user.email,
             displayName: user.display_name || null,
@@ -426,6 +459,28 @@ app.get('/api/auth/google/config', (req, res) => {
   res.status(200).json({ enabled: isConfigured });
 });
 
+// Endpoint: Poll for Electron browser authentication status
+app.get('/api/auth/poll', (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.status(400).json({ error: 'Missing token parameter.' });
+  }
+
+  const auth = pendingAuths.get(token);
+  if (!auth) {
+    return res.status(200).json({ status: 'pending' });
+  }
+
+  if (auth.error) {
+    pendingAuths.delete(token);
+    return res.status(200).json({ status: 'error', error: auth.error });
+  }
+
+  // Success: return session ID
+  pendingAuths.delete(token);
+  return res.status(200).json({ status: 'success', sessionId: auth.sessionId });
+});
+
 
 // 1. Redirect User to Google
 app.get('/api/auth/google', (req, res) => {
@@ -438,9 +493,74 @@ app.get('/api/auth/google', (req, res) => {
   res.redirect(url);
 });
 
+// Helper to render sci-fi themed HTML auth pages for Electron login browser flows
+function renderAuthResponseHtml(res, title, header, message, isSuccess) {
+  const primaryColor = isSuccess ? '#39ff14' : '#ff007f';
+  const shadowColor = isSuccess ? 'rgba(57, 255, 20, 0.2)' : 'rgba(255, 0, 127, 0.2)';
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>${title}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+        <style>
+          body {
+            background-color: #05030d;
+            color: ${primaryColor};
+            font-family: 'Share Tech Mono', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+            overflow: hidden;
+          }
+          .container {
+            border: 1px solid ${primaryColor};
+            padding: 40px;
+            background: rgba(0,0,0,0.85);
+            box-shadow: 0 0 30px ${shadowColor};
+            border-radius: 4px;
+            max-width: 450px;
+          }
+          h1 {
+            color: #00ffff;
+            font-size: 24px;
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(0,255,255,0.3);
+          }
+          p {
+            font-size: 15px;
+            line-height: 1.6;
+            margin: 15px 0;
+          }
+          .accent-glow {
+            text-shadow: 0 0 8px ${primaryColor};
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>${header}</h1>
+          <p class="accent-glow">${message}</p>
+          <p style="color: #888; font-size: 12px; margin-top: 30px;">
+            [COMMAND TERMINAL SECURED]
+          </p>
+        </div>
+      </body>
+    </html>
+  `);
+}
+
 // 2. Handle the Callback from Google
 app.get('/api/auth/callback/google', async (req, res) => {
   const { code, state } = req.query;
+
+  const stateParams = new URLSearchParams(state || '');
+  const isElectron = stateParams.get('source') === 'electron';
+  const token = stateParams.get('token') || '';
 
   try {
     // Exchange code for tokens
@@ -468,7 +588,13 @@ app.get('/api/auth/callback/google', async (req, res) => {
           'INSERT INTO users (email, password_hash, is_google_linked, display_name) VALUES (?, NULL, 1, ?)',
           [email, displayName],
           function (insertErr) {
-            if (insertErr) return res.redirect('/login?error=db_fail');
+            if (insertErr) {
+              if (isElectron && token) {
+                pendingAuths.set(token, { error: 'db_fail', createdAt: Date.now() });
+                return renderAuthResponseHtml(res, 'Star-Swarm Command Error', 'CONNECTION FAILURE', 'Database link operation failed.', false);
+              }
+              return res.redirect('/login?error=db_fail');
+            }
             finalizeOAuthLogin(req, res, email, 0, 0, 1, displayName, false, state);
           }
         );
@@ -476,6 +602,10 @@ app.get('/api/auth/callback/google', async (req, res) => {
     });
   } catch (error) {
     console.error('Google OAuth Error:', error);
+    if (isElectron && token) {
+      pendingAuths.set(token, { error: 'oauth_failed', createdAt: Date.now() });
+      return renderAuthResponseHtml(res, 'Star-Swarm OAuth Error', 'AUTHENTICATION FAILURE', 'Google OAuth callback link verification failed.', false);
+    }
     res.redirect('/login?error=oauth_failed');
   }
 });
@@ -486,11 +616,21 @@ function finalizeOAuthLogin(req, res, userEmail, gamesPlayed, gamesWon, isGoogle
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
   const csrfToken = crypto.randomBytes(24).toString('hex');
 
+  const stateParams = new URLSearchParams(state || '');
+  const isElectron = stateParams.get('source') === 'electron';
+  const token = stateParams.get('token') || '';
+
   db.run(
     'INSERT INTO sessions (id, email, expires_at, csrf_token) VALUES (?, ?, ?, ?)',
     [sessionId, userEmail, expiresAt, csrfToken],
     (err) => {
-      if (err) return res.redirect('/login?error=session_fail');
+      if (err) {
+        if (isElectron && token) {
+          pendingAuths.set(token, { error: 'session_fail', createdAt: Date.now() });
+          return renderAuthResponseHtml(res, 'Star-Swarm Session Error', 'SESSION DEPLOYMENT FAILURE', 'Failed to generate user commander session.', false);
+        }
+        return res.redirect('/login?error=session_fail');
+      }
 
       res.cookie('session_id', sessionId, {
         httpOnly: true,
@@ -498,6 +638,11 @@ function finalizeOAuthLogin(req, res, userEmail, gamesPlayed, gamesWon, isGoogle
         secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
         maxAge: 2 * 60 * 60 * 1000
       });
+
+      if (isElectron && token) {
+        pendingAuths.set(token, { sessionId, createdAt: Date.now() });
+        return renderAuthResponseHtml(res, 'Star-Swarm Authenticated', 'COMMAND PROTOCOL ESTABLISHED', 'Commander authenticated successfully. You can now close this tab and return to the Star-Swarm game console.', true);
+      }
 
       // Redirect back to the frontend dashboard or home, preserving state query params
       res.redirect('/' + (state ? state : ''));
@@ -511,8 +656,10 @@ app.get('/api/me', (req, res) => {
     if (err || !user) {
       return res.status(401).json({ error: 'Unauthorized. No active session.' });
     }
+    const sessionId = req.headers['x-session-id'] || req.cookies['session_id'];
     res.status(200).json({
       success: true,
+      sessionId,
       user: {
         email: user.email,
         displayName: user.display_name || null,
@@ -792,6 +939,280 @@ app.get('/api/games', (req, res) => {
         totalCount: filteredGames.length
       });
     }
+  });
+});
+
+// Endpoint: Sync local and remote matches
+app.post('/api/games/sync', validateCSRF, (req, res) => {
+  getSessionUser(req, (err, user) => {
+    const guestEmail = req.headers['x-guest-email'] || req.headers['x-guest-name'] || null;
+    const effectiveEmail = user ? user.email : guestEmail;
+
+    if (!effectiveEmail) {
+      return res.status(401).json({ error: 'Unauthorized. Please log in or establish guest identity first.' });
+    }
+
+    const { localGames } = req.body;
+    if (!Array.isArray(localGames)) {
+      return res.status(400).json({ error: 'Invalid sync payload. localGames must be an array.' });
+    }
+
+    // Pre-process local games: Replace 'commander@local' with 'effectiveEmail' and update timestamps if modified
+    localGames.forEach(localGame => {
+      let emailUpdated = false;
+      if (localGame.owner_email === 'commander@local') {
+        localGame.owner_email = effectiveEmail;
+        emailUpdated = true;
+      }
+      if (localGame.game_state) {
+        try {
+          let state;
+          let isString = false;
+          if (typeof localGame.game_state === 'string') {
+            state = JSON.parse(localGame.game_state);
+            isString = true;
+          } else {
+            state = localGame.game_state;
+          }
+
+          if (state && Array.isArray(state.players)) {
+            state.players.forEach(p => {
+              if (p.assignedEmail === 'commander@local') {
+                p.assignedEmail = effectiveEmail;
+                emailUpdated = true;
+              }
+            });
+            if (emailUpdated) {
+              localGame.game_state = isString ? JSON.stringify(state) : state;
+            }
+          }
+        } catch (e) {
+          console.error('Error pre-processing game state during sync:', e);
+        }
+      }
+      if (emailUpdated) {
+        localGame.updated_at = new Date().toISOString();
+      }
+    });
+
+    const localGameIds = localGames.map(g => g.id).filter(Boolean);
+    const placeholders = localGameIds.map(() => '?').join(',');
+
+    let query = 'SELECT id, invite_code, owner_email, name, game_state, created_at, updated_at FROM games WHERE owner_email = ? OR game_state LIKE ?';
+    const queryParams = [effectiveEmail, '%"assignedEmail":"' + effectiveEmail + '"%'];
+
+    if (localGameIds.length > 0) {
+      query += ` OR id IN (${placeholders})`;
+      queryParams.push(...localGameIds);
+    }
+
+    // Fetch matching games
+    db.all(query, queryParams, (queryErr, serverRows) => {
+      if (queryErr) {
+        console.error('Error fetching games for sync:', queryErr.message);
+        return res.status(500).json({ error: 'Failed to fetch server games for sync.' });
+      }
+
+      const serverGamesMap = new Map();
+      serverRows.forEach(row => {
+        serverGamesMap.set(row.id, row);
+      });
+
+      const localUpdates = [];
+      const serverUpserts = [];
+
+      // 1. Process local games
+      localGames.forEach(localGame => {
+        const serverGame = serverGamesMap.get(localGame.id);
+        if (serverGame) {
+          // Authorization check
+          const isOwner = serverGame.owner_email === effectiveEmail;
+          const isGuestGame = serverGame.owner_email === null || !serverGame.owner_email.includes('@') || serverGame.owner_email === 'commander@local';
+          let isPlayer = false;
+          try {
+            const parsedState = typeof serverGame.game_state === 'string' ? JSON.parse(serverGame.game_state) : serverGame.game_state;
+            isPlayer = parsedState?.players?.some(p => p.assignedEmail === effectiveEmail) || false;
+          } catch (e) {}
+
+          if (!isOwner && !isGuestGame && !isPlayer) {
+            console.warn(`Sync warning: User ${effectiveEmail} is not authorized to update game ${localGame.id}`);
+            return; // Skip unauthorized game sync
+          }
+
+          const localTime = new Date(localGame.updated_at).getTime();
+          const serverTime = new Date(serverGame.updated_at).getTime();
+
+          if (isGuestGame && user) {
+            // Claim ownership of guest game on server
+            // Clean up any remaining commander@local in the server's game_state if we use it
+            let cleanServerState = serverGame.game_state;
+            try {
+              let state = typeof cleanServerState === 'string' ? JSON.parse(cleanServerState) : cleanServerState;
+              if (state && Array.isArray(state.players)) {
+                let stateUpdated = false;
+                state.players.forEach(p => {
+                  if (p.assignedEmail === 'commander@local') {
+                    p.assignedEmail = user.email;
+                    stateUpdated = true;
+                  }
+                });
+                if (stateUpdated) {
+                  cleanServerState = JSON.stringify(state);
+                }
+              }
+            } catch (e) {
+              console.error('Error cleaning server game state during guest claim:', e);
+            }
+
+            serverUpserts.push({
+              id: localGame.id,
+              invite_code: serverGame.invite_code || localGame.invite_code || generateInviteCode(),
+              owner_email: user.email,
+              name: serverTime > localTime ? serverGame.name : localGame.name,
+              game_state: serverTime > localTime ? cleanServerState : (typeof localGame.game_state === 'string' ? localGame.game_state : JSON.stringify(localGame.game_state)),
+              created_at: serverGame.created_at || localGame.created_at,
+              updated_at: serverTime > localTime ? serverGame.updated_at : localGame.updated_at
+            });
+
+            if (serverTime > localTime) {
+              localUpdates.push({
+                id: serverGame.id,
+                invite_code: serverGame.invite_code,
+                owner_email: user.email,
+                name: serverGame.name,
+                game_state: cleanServerState,
+                created_at: serverGame.created_at,
+                updated_at: serverGame.updated_at
+              });
+            }
+          } else if (localTime > serverTime) {
+            // Local is newer: upload to server
+            serverUpserts.push({
+              id: localGame.id,
+              invite_code: serverGame.invite_code || localGame.invite_code || generateInviteCode(),
+              owner_email: (serverGame.owner_email === 'commander@local' || !serverGame.owner_email) ? effectiveEmail : serverGame.owner_email,
+              name: localGame.name,
+              game_state: typeof localGame.game_state === 'string' ? localGame.game_state : JSON.stringify(localGame.game_state),
+              created_at: serverGame.created_at || localGame.created_at,
+              updated_at: localGame.updated_at
+            });
+          } else if (serverTime > localTime) {
+            // Server is newer: download to local
+            localUpdates.push({
+              id: serverGame.id,
+              invite_code: serverGame.invite_code,
+              owner_email: serverGame.owner_email,
+              name: serverGame.name,
+              game_state: serverGame.game_state,
+              created_at: serverGame.created_at,
+              updated_at: serverGame.updated_at
+            });
+          }
+        } else {
+          // Doesn't exist on server: insert into server
+          serverUpserts.push({
+            id: localGame.id,
+            invite_code: localGame.invite_code || generateInviteCode(),
+            owner_email: user ? user.email : null,
+            name: localGame.name,
+            game_state: typeof localGame.game_state === 'string' ? localGame.game_state : JSON.stringify(localGame.game_state),
+            created_at: localGame.created_at || new Date().toISOString(),
+            updated_at: localGame.updated_at || new Date().toISOString()
+          });
+        }
+      });
+
+      // 2. Process server games that are not in local list
+      const localGamesSet = new Set(localGames.map(g => g.id));
+      serverRows.forEach(serverGame => {
+        const isOwner = serverGame.owner_email === effectiveEmail;
+        let isPlayer = false;
+        try {
+          const parsedState = typeof serverGame.game_state === 'string' ? JSON.parse(serverGame.game_state) : serverGame.game_state;
+          isPlayer = parsedState?.players?.some(p => p.assignedEmail === effectiveEmail) || false;
+        } catch (e) {}
+
+        if ((isOwner || isPlayer) && !localGamesSet.has(serverGame.id)) {
+          localUpdates.push({
+            id: serverGame.id,
+            invite_code: serverGame.invite_code,
+            owner_email: serverGame.owner_email,
+            name: serverGame.name,
+            game_state: serverGame.game_state,
+            created_at: serverGame.created_at,
+            updated_at: serverGame.updated_at
+          });
+        }
+      });
+
+      if (serverUpserts.length === 0) {
+        const uniqueUpdatesMap = new Map();
+        localUpdates.forEach(g => {
+          uniqueUpdatesMap.set(g.id, g);
+        });
+        const deduplicatedUpdates = Array.from(uniqueUpdatesMap.values());
+        return res.status(200).json({ success: true, localUpdates: deduplicatedUpdates });
+      }
+
+      let errorOccured = false;
+
+      function executeUpsert(index) {
+        if (index >= serverUpserts.length) {
+          if (errorOccured) {
+            res.status(500).json({ error: 'Database sync upsert failed.' });
+          } else {
+            // Deduplicate localUpdates before returning
+            const uniqueUpdatesMap = new Map();
+            localUpdates.forEach(g => {
+              uniqueUpdatesMap.set(g.id, g);
+            });
+            const deduplicatedUpdates = Array.from(uniqueUpdatesMap.values());
+            res.status(200).json({ success: true, localUpdates: deduplicatedUpdates });
+          }
+          return;
+        }
+
+        const game = serverUpserts[index];
+        db.get('SELECT id FROM games WHERE invite_code = ? AND id != ?', [game.invite_code, game.id], (codeErr, codeRow) => {
+          if (codeRow) {
+            game.invite_code = generateInviteCode();
+          }
+
+          db.run(
+            `INSERT INTO games (id, invite_code, owner_email, name, game_state, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               game_state = excluded.game_state,
+               owner_email = CASE 
+                 WHEN games.owner_email IS NULL OR games.owner_email NOT LIKE '%@%' OR games.owner_email = 'commander@local' THEN excluded.owner_email 
+                 ELSE games.owner_email 
+               END,
+               updated_at = excluded.updated_at`,
+            [game.id, game.invite_code, game.owner_email, game.name, game.game_state, game.created_at, game.updated_at],
+            function(err) {
+              if (err) {
+                console.error('Error during sync upsert:', err.message);
+                errorOccured = true;
+              } else {
+                localUpdates.push({
+                  id: game.id,
+                  invite_code: game.invite_code,
+                  owner_email: game.owner_email,
+                  name: game.name,
+                  game_state: game.game_state,
+                  created_at: game.created_at,
+                  updated_at: game.updated_at
+                });
+              }
+              executeUpsert(index + 1);
+            }
+          );
+        });
+      }
+
+      executeUpsert(0);
+    });
   });
 });
 

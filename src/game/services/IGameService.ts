@@ -17,4 +17,5 @@ export interface IGameService {
   checkMyJoinStatus(gameId: string, email?: string): Promise<{ success: boolean; status?: 'pending' | 'accepted' | 'rejected' | null; joinId?: number; error?: string }>;
   rejectJoinRequest(gameId: string, joinRequestId: number): Promise<{ success: boolean; error?: string }>;
   performGameAction(gameId: string, action: string, playerId: number, params?: any): Promise<{ success: boolean; gameState?: GameState; error?: string }>;
+  syncGames(localGames: any[]): Promise<{ success: boolean; localUpdates?: any[]; error?: string }>;
 }

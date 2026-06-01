@@ -35,6 +35,7 @@ interface LobbyScreenProps {
   handleStartGame: () => void;
   handleReturnToMenu: () => void;
   currentUser: { email: string } | null;
+  playOnline?: boolean;
 }
 
 export const LobbyScreen: React.FC<LobbyScreenProps> = ({
@@ -68,7 +69,8 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   handleAddPlayer,
   handleStartGame,
   handleReturnToMenu,
-  currentUser
+  currentUser,
+  playOnline = false
 }) => {
   return (
     <div style={{
@@ -355,11 +357,11 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
             {playersSetup.map((player, idx) => {
               const factionColor = player.color || FACTION_INFO[player.id]?.color || '#ffffff';
-              const isElectron = isElectronMode();
+              const isOfflineElectron = isElectronMode() && !playOnline;
               return (
                 <div key={player.id} style={{
                   display: 'grid',
-                  gridTemplateColumns: isElectron ? '24px 2fr 1fr 1.2fr 32px' : '24px 1.5fr 1fr 1fr 90px 2fr 32px',
+                  gridTemplateColumns: isOfflineElectron ? '24px 2fr 1fr 1.2fr 32px' : '24px 1.5fr 1fr 1fr 90px 2fr 32px',
                   gap: '8px',
                   alignItems: 'center',
                   background: 'rgba(255,255,255,0.02)',
@@ -445,7 +447,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   </div>
 
                   {/* Local Playable Checkbox */}
-                  {!isElectron && (
+                  {!isOfflineElectron && (
                     player.type === 'human' ? (
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
                         <input
@@ -463,7 +465,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   )}
 
                   {/* Assigned Email */}
-                  {!isElectron && (
+                  {!isOfflineElectron && (
                     player.type === 'human' ? (
                       <input
                         type="text"

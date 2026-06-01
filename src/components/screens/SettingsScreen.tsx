@@ -1,6 +1,7 @@
 import React from 'react';
 import { UserAccount } from '../../game/auth';
 import { updatePassword } from '../../game/gameApi';
+import { isElectronMode } from '../../utils/env';
 
 
 interface SettingsScreenProps {
@@ -24,6 +25,10 @@ interface SettingsScreenProps {
   settingsCompactMode: boolean;
   setSettingsCompactMode: (v: boolean) => void;
   isMobile?: boolean;
+  settingsPlayOnline: boolean;
+  setSettingsPlayOnline: (v: boolean) => void;
+  settingsServerUrl: string;
+  setSettingsServerUrl: (v: string) => void;
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
@@ -45,7 +50,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onNavigateMenu,
   settingsCompactMode,
   setSettingsCompactMode,
-  isMobile = false
+  isMobile = false,
+  settingsPlayOnline,
+  setSettingsPlayOnline,
+  settingsServerUrl,
+  setSettingsServerUrl
 }) => {
   const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -166,6 +175,67 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             Enable Compact Mode {isMobile ? '(Auto-Active on Mobile Viewport)' : '(Mobile Optimized)'}
           </label>
         </div>
+
+        {/* Server Connection Options (Only in Electron Mode) */}
+        {isElectronMode() && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '15px' }}>
+            <h3 style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Server Connection Setup
+            </h3>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="checkbox"
+                id="play-online-checkbox"
+                checked={settingsPlayOnline}
+                onChange={(e) => setSettingsPlayOnline(e.target.checked)}
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  accentColor: 'var(--accent-cyan)',
+                  cursor: 'pointer'
+                }}
+              />
+              <label
+                htmlFor="play-online-checkbox"
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'Share Tech Mono',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px'
+                }}
+              >
+                Play via Server (Online Mode)
+              </label>
+            </div>
+
+            {settingsPlayOnline && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontFamily: 'Share Tech Mono' }}>
+                  Server Connection URL
+                </label>
+                <input
+                  type="text"
+                  value={settingsServerUrl}
+                  onChange={(e) => setSettingsServerUrl(e.target.value)}
+                  placeholder="http://localhost:3001"
+                  style={{
+                    background: 'rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'white',
+                    padding: '8px 12px',
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    fontFamily: 'Share Tech Mono'
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Security Section (Change Password) */}
         {currentUser && (

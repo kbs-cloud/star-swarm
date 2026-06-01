@@ -36,6 +36,10 @@ export class LocalAuthService implements IAuthService {
     this.currentUserCache = null;
   }
 
+  public async pollAuth(token: string): Promise<{ status: 'pending' | 'success' | 'error'; sessionId?: string; error?: string }> {
+    return { status: 'error', error: 'OAuth not supported offline.' };
+  }
+
   public async recordGameStats(email: string, won: boolean): Promise<void> {
     const displayName = localStorage.getItem('starswarm_display_name') || 'Commander';
     const key = `starswarm_offline_stats_${displayName}`;

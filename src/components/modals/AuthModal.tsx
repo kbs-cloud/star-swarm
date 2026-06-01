@@ -9,6 +9,8 @@ interface AuthModalProps {
   authError: string | null;
   authSuccess: string | null;
   isGoogleAuthEnabled: boolean;
+  isGooglePolling?: boolean;
+  onCancelGooglePoll?: () => void;
   onClose: () => void;
   onSetTab: (tab: 'signin' | 'register') => void;
   onSetEmail: (v: string) => void;
@@ -25,6 +27,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   authError,
   authSuccess,
   isGoogleAuthEnabled,
+  isGooglePolling = false,
+  onCancelGooglePoll,
   onClose,
   onSetTab,
   onSetEmail,
@@ -33,6 +37,65 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onRegister
 }) => {
   if (!isOpen) return null;
+
+  if (isGooglePolling) {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(5, 3, 13, 0.85)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000
+      }}>
+        <div style={{
+          width: '420px',
+          padding: '30px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '20px',
+          textAlign: 'center'
+        }} className="glass-panel glass-panel-neon-cyan">
+          <h2 style={{ fontSize: '18px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
+            ESTABLISHING COMMAND LINK
+          </h2>
+          <div style={{ margin: '20px 0', color: 'white', fontSize: '14px', fontFamily: 'Outfit', lineHeight: '1.6' }}>
+            Please complete Google authentication in your default web browser.
+          </div>
+          <div style={{
+            display: 'inline-block',
+            margin: '10px auto',
+            width: '30px',
+            height: '30px',
+            border: '3px solid rgba(0, 255, 255, 0.2)',
+            borderTopColor: 'var(--accent-cyan)',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <style>{`
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>
+            [WAITING FOR BROWSER VALIDATION...]
+          </div>
+          <button
+            className="btn-sci-fi btn-danger"
+            style={{ width: '100%', marginTop: '15px', justifyContent: 'center' }}
+            onClick={onCancelGooglePoll}
+          >
+            CANCEL CONNECTION REQUEST
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -205,8 +268,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 marginTop: '5px'
               }}
               onClick={() => {
-                const stateParam = window.location.search;
-                window.location.href = `/api/auth/google?state=${encodeURIComponent(stateParam)}`;
+                let stateParam = window.location.search;
+                const playOnline = localStorage.getItem('starswarm_play_online') === 'true';
+                const serverUrl = localStorage.getItem('starswarm_server_url') || 'http://localhost:3001';
+                const isElectron = window.navigator.userAgent.toLowerCase().includes('electron') ||
+                  !!((window as any).process && (window as any).process.versions && (window as any).process.versions.electron);
+
+                if (isElectron) {
+                  const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                  localStorage.setItem('starswarm_auth_pending_token', token);
+
+                  const params = new URLSearchParams(stateParam);
+                  params.set('source', 'electron');
+                  params.set('token', token);
+                  stateParam = '?' + params.toString();
+                }
+
+                const base = (isElectron && playOnline) ? serverUrl.replace(/\/$/, '') : '';
+                window.location.href = `${base}/api/auth/google?state=${encodeURIComponent(stateParam)}`;
               }}
             >
               <svg width="18" height="18" viewBox="0 0 18 18" style={{ marginRight: '8px' }}>

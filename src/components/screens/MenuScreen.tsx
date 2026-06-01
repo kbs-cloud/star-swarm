@@ -39,6 +39,10 @@ interface MenuScreenProps {
   showToast: (msg: string, type?: 'success' | 'warning' | 'info', duration?: number) => void;
   showError: (msg: string) => void;
   compactMode: boolean;
+  isOnline: boolean;
+  onToggleOnline: () => void;
+  onSyncMatches: () => void;
+  serverUrl: string;
 }
 
 export const MenuScreen: React.FC<MenuScreenProps> = ({
@@ -73,7 +77,11 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   rejectJoinRequest,
   showToast,
   showError,
-  compactMode
+  compactMode,
+  isOnline,
+  onToggleOnline,
+  onSyncMatches,
+  serverUrl
 }) => {
   const [activeMenuTab, setActiveMenuTab] = React.useState<'skirmish' | 'simulations'>('skirmish');
   const hasSavedSimulations = currentUser || savedGames.length > 0;
@@ -314,7 +322,9 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
 
           const turnNumber = gameStateObj?.turnNumber || 1;
           const totalPlayers = gameStateObj?.players?.length || 0;
-          const activePlayersCount = gameStateObj ? gameStateObj.players.filter(p => !gameStateObj.playerState[p.id]?.lost).length : 0;
+          const activePlayersCount = (gameStateObj && Array.isArray(gameStateObj.players) && gameStateObj.playerState)
+            ? gameStateObj.players.filter(p => gameStateObj.playerState[p.id] && !gameStateObj.playerState[p.id].lost).length
+            : 0;
 
           return (
             <div key={game.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -686,6 +696,65 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
           margin: 0
         }}>Tactical Grid Space Conquest</p>
       </div>
+
+      {/* Connection Status & Control Banner (Electron Mode only) */}
+      {isElectronMode() && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          background: 'rgba(0,0,0,0.5)',
+          border: isOnline ? '1px solid rgba(0, 240, 255, 0.35)' : '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: '8px',
+          padding: '10px 16px',
+          width: '100%',
+          maxWidth: compactMode ? '500px' : '1100px',
+          boxSizing: 'border-box',
+          gap: '12px',
+          flexWrap: 'wrap',
+          boxShadow: isOnline ? '0 0 10px rgba(0, 240, 255, 0.05)' : 'none',
+          zIndex: 2,
+        }} className="glass-panel">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: isOnline ? 'var(--accent-cyan)' : '#888',
+              boxShadow: isOnline ? '0 0 8px var(--accent-cyan)' : 'none',
+              display: 'inline-block'
+            }} />
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'Share Tech Mono', letterSpacing: '1px' }}>
+              SECTOR LINK: {isOnline ? `ONLINE [${serverUrl.replace(/^https?:\/\//, '')}]` : 'OFFLINE (LOCAL MODE)'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {isOnline && (
+              <button
+                className="btn-sci-fi"
+                style={{ padding: '6px 12px', fontSize: '10px', height: '28px', textTransform: 'uppercase' }}
+                onClick={onSyncMatches}
+              >
+                🔄 Sync Simulations
+              </button>
+            )}
+            <button
+              className="btn-sci-fi"
+              style={{
+                padding: '6px 12px',
+                fontSize: '10px',
+                height: '28px',
+                textTransform: 'uppercase',
+                borderColor: isOnline ? 'rgba(255,0,127,0.4)' : 'rgba(0,240,255,0.4)'
+              }}
+              onClick={onToggleOnline}
+            >
+              {isOnline ? 'Go Offline' : 'Go Online'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main content body */}
       {compactMode ? (

@@ -1,6 +1,9 @@
 import { IGameService } from './IGameService';
 import { GameState } from '../gameState';
 import { GameMetadata, GameDetails, GameListParams, JoinRequest } from '../gameApi';
+import { apiFetch } from './apiFetch';
+
+const fetch = apiFetch;
 
 export class OnlineGameService implements IGameService {
   private getCookie(name: string): string | null {
@@ -12,12 +15,17 @@ export class OnlineGameService implements IGameService {
   }
 
   private getHeaders(): Record<string, string> {
-    const csrfToken = this.getCookie('csrf_token') || '';
+    const cookieToken = this.getCookie('csrf_token') || '';
+    const csrfToken = cookieToken || localStorage.getItem('starswarm_csrf_token') || '';
+    const sessionId = localStorage.getItem('starswarm_session_id') || '';
     const guestName = localStorage.getItem('starswarm_guest_name') || '';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-CSRF-Token': csrfToken
     };
+    if (sessionId) {
+      headers['X-Session-ID'] = sessionId;
+    }
     if (guestName) {
       headers['X-Guest-Name'] = guestName;
       headers['X-Guest-Email'] = guestName;
@@ -305,6 +313,23 @@ export class OnlineGameService implements IGameService {
         return { success: true, gameState: data.gameState };
       }
       return { success: false, error: data.error || 'Action failed.' };
+    } catch (e) {
+      return { success: false, error: 'Server connection failed.' };
+    }
+  }
+
+  public async syncGames(localGames: any[]): Promise<{ success: boolean; localUpdates?: any[]; error?: string }> {
+    try {
+      const response = await fetch('/api/games/sync', {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ localGames })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        return { success: true, localUpdates: data.localUpdates };
+      }
+      return { success: false, error: data.error || 'Sync failed.' };
     } catch (e) {
       return { success: false, error: 'Server connection failed.' };
     }

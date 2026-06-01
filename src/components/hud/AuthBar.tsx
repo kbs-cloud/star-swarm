@@ -227,7 +227,7 @@ export const AuthBar: React.FC<AuthBarProps> = ({
                 >
                   SETTINGS
                 </button>
-                {!isElectronMode() && (
+                {(!isElectronMode() || (currentUser && currentUser.email !== 'commander@local')) && (
                   <button 
                     className="btn-sci-fi btn-danger" 
                     style={{ padding: '6px 12px', fontSize: '11px', justifyContent: 'flex-start', width: '100%' }} 
@@ -333,7 +333,7 @@ export const AuthBar: React.FC<AuthBarProps> = ({
           <button className="btn-sci-fi" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onNavigateSettings}>
             SETTINGS
           </button>
-          {!isElectronMode() && (
+          {(!isElectronMode() || (currentUser && currentUser.email !== 'commander@local')) && (
             <button className="btn-sci-fi btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onLogout}>
               LOG OUT
             </button>

@@ -74,6 +74,13 @@ export async function logoutUser(): Promise<void> {
 }
 
 /**
+ * Polls the auth status of a pending token.
+ */
+export async function pollAuth(token: string): Promise<{ status: 'pending' | 'success' | 'error'; sessionId?: string; error?: string }> {
+  return authService.pollAuth(token);
+}
+
+/**
  * Updates win/loss telemetry stats.
  */
 export async function recordGameStats(email: string, won: boolean): Promise<void> {
