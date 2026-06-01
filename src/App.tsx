@@ -802,6 +802,7 @@ export default function App() {
     localStorage.setItem('starswarm_compact_mode', settingsCompactMode ? 'true' : 'false');
     setCompactMode(settingsCompactMode);
 
+    let effectiveUser = currentUser;
     if (isElectronMode()) {
       const prevPlayOnline = localStorage.getItem('starswarm_play_online') === 'true';
       const playOnlineChanged = prevPlayOnline !== settingsPlayOnline;
@@ -817,18 +818,31 @@ export default function App() {
         const user = await checkSession();
         if (user) {
           setCurrentUser(user);
+          effectiveUser = user;
           showToast(`Connected to server as ${user.displayName || user.email}`, 'success');
         } else {
           setCurrentUser(null);
+          effectiveUser = null;
           showToast('Connected to server as Guest.', 'info');
+        }
+        try {
+          const config = await checkGoogleOAuthConfig();
+          setIsGoogleAuthEnabled(config.enabled);
+        } catch (e) {
+          console.error('Failed to check Google OAuth config:', e);
         }
       } else if (playOnlineChanged) {
         setCurrentUser(null);
+        effectiveUser = null;
         showToast('Switched to Local/Offline Mode.', 'info');
+        setIsGoogleAuthEnabled(false);
       }
     }
 
-    if (currentUser && (!isElectronMode() || settingsPlayOnline)) {
+    const isOnline = !isElectronMode() || settingsPlayOnline;
+    const isRealUser = effectiveUser && effectiveUser.email !== 'commander@local';
+
+    if (isOnline && isRealUser) {
       const res = await updateSettings(settingsDisplayName);
       if (res.success) {
         const updatedUser = await checkSession();
@@ -860,9 +874,16 @@ export default function App() {
         setCurrentUser(null);
         showToast('Online Mode active. Sign in to host or play multiplayer.', 'info');
       }
+      try {
+        const config = await checkGoogleOAuthConfig();
+        setIsGoogleAuthEnabled(config.enabled);
+      } catch (e) {
+        console.error('Failed to check Google OAuth config:', e);
+      }
     } else {
       setCurrentUser(null);
       showToast('Switched to Local/Offline Mode.', 'info');
+      setIsGoogleAuthEnabled(false);
     }
     loadGamesList(true);
   };
@@ -1029,6 +1050,8 @@ export default function App() {
             const user = await checkSession();
             if (user) {
               setCurrentUser(user);
+              setIsAuthModalOpen(false);
+              clearAuthInputs();
               showToast(`Connected as ${user.displayName || user.email}`, 'success');
             } else {
               showError('Failed to establish user session.');
@@ -1081,6 +1104,22 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  // Dynamically query Google OAuth config when the authentication modal is opened
+  React.useEffect(() => {
+    if (isAuthModalOpen) {
+      const checkConfig = async () => {
+        try {
+          const config = await checkGoogleOAuthConfig();
+          setIsGoogleAuthEnabled(config.enabled);
+        } catch (e) {
+          console.error('Failed to check Google OAuth config on modal open:', e);
+          setIsGoogleAuthEnabled(false);
+        }
+      };
+      checkConfig();
+    }
+  }, [isAuthModalOpen]);
 
   // Load custom game modes when current user changes
   React.useEffect(() => {
