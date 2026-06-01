@@ -336,7 +336,7 @@ export default function App() {
   function initBackgroundMusic() {
     if (backgroundMusicRef.current === null) {
       try {
-        backgroundMusicRef.current = new Audio('/menu-background-loop.mp3');
+        backgroundMusicRef.current = new Audio('./menu_loop_music.mp3');
         backgroundMusicRef.current.volume = 0.85;
         backgroundMusicRef.current.loop = true;
 
@@ -369,7 +369,7 @@ export default function App() {
 
         if (!soundMutedRef.current) {
           try {
-            const audio = new Audio('/button-hover.mp3');
+            const audio = new Audio('./button-hover.mp3');
             audio.volume = 0.85;
             audio.play().catch(err => {
               if (err.name !== 'AbortError') {
@@ -1243,7 +1243,7 @@ export default function App() {
           // Play turn-start sound effect if not muted
           if (!soundMutedRef.current) {
             try {
-              const audio = new Audio('/turn-start.mp3');
+              const audio = new Audio('./turn-start.mp3');
               audio.volume = 0.45;
               audio.play().catch(err => {
                 console.warn('Audio playback failed:', err);
@@ -2083,7 +2083,7 @@ export default function App() {
     // Play end-turn sound effect if not muted
     if (!soundMutedRef.current) {
       try {
-        const audio = new Audio('/end-turn.mp3');
+        const audio = new Audio('./end-turn.mp3');
         audio.volume = 0.45;
         audio.play().catch(err => {
           console.warn('Audio playback failed:', err);
