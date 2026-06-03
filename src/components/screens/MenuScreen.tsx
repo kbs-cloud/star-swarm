@@ -4,7 +4,7 @@ import { GameMetadata, JoinRequest } from '../../game/gameApi';
 import { UserAccount } from '../../game/auth';
 import { getGameTurnStatus, canCancelEndTurnInGame } from '../../utils/gameHelpers';
 import { copyToClipboard } from '../../utils/clipboard';
-import { isElectronMode } from '../../utils/env';
+import { isPackagedMode } from '../../utils/env';
 
 interface MenuScreenProps {
   currentUser: UserAccount | null;
@@ -351,7 +351,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                       {game.name}
                     </div>
                     {/* Pending join requests badge */}
-                    {!isElectronMode() && pendingReqs.length > 0 && (
+                    {!isPackagedMode() && pendingReqs.length > 0 && (
                       <span
                         style={{
                           background: 'var(--accent-cyan)',
@@ -436,7 +436,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: '90px' }}>
                   {/* Invite link copy button */}
-                  {!isElectronMode() && (
+                  {!isPackagedMode() && (
                     <button
                       className="btn-sci-fi"
                       style={{ padding: '4px 8px', fontSize: '9px' }}
@@ -502,7 +502,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
               </div>
 
               {/* JOIN REQUESTS EXPAND PANEL */}
-              {!isElectronMode() && isPanelOpen && pendingReqs.length > 0 && (
+              {!isPackagedMode() && isPanelOpen && pendingReqs.length > 0 && (
                 <div style={{
                   background: 'rgba(0,240,255,0.04)',
                   border: '1px solid rgba(0,240,255,0.2)',
@@ -698,7 +698,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       </div>
 
       {/* Connection Status & Control Banner (Electron Mode only) */}
-      {isElectronMode() && (
+      {isPackagedMode() && (
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',

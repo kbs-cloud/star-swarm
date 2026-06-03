@@ -106,6 +106,13 @@ export interface Fleet {
   speed: number;
 }
 
+export interface AIConfig {
+  aggression: number;   // 0 - 100
+  expansion: number;    // 0 - 100
+  techFocus: number;    // 0 - 100
+  economyBonus: number; // 0 - 30
+}
+
 export interface Player {
   id: number;
   type: 'human' | 'ai';
@@ -115,6 +122,8 @@ export interface Player {
   isLocal?: boolean;
   assignedEmail?: string | null;
   endedTurn?: boolean;
+  difficulty?: 'easy' | 'medium' | 'hard' | 'custom';
+  aiConfig?: AIConfig;
 }
 
 export interface PlayerState {
@@ -129,6 +138,8 @@ export interface PlayerState {
   };
   lost: boolean;
   color?: string;
+  difficulty?: 'easy' | 'medium' | 'hard' | 'custom';
+  aiConfig?: AIConfig;
 }
 
 export interface CombatRound {
@@ -454,7 +465,9 @@ export function initializeGame(options: {
       team: p.team !== undefined ? p.team : factionDefault.team,
       isLocal: p.isLocal !== undefined ? p.isLocal : (p.type === 'human'),
       assignedEmail: p.assignedEmail || null,
-      endedTurn: p.endedTurn || false
+      endedTurn: p.endedTurn || false,
+      difficulty: p.difficulty || 'medium',
+      aiConfig: p.aiConfig
     };
   });
 
@@ -575,7 +588,9 @@ export function initializeGame(options: {
         Hyperdrive: 0
       },
       lost: false,
-      color: p.color
+      color: p.color,
+      difficulty: p.difficulty || 'medium',
+      aiConfig: p.aiConfig
     };
   });
 

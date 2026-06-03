@@ -235,3 +235,93 @@ test.describe('Game State Engine - Spacing Optimization', () => {
     expect(coordinateDiffers).toBe(true);
   });
 });
+
+import { runAITurn } from '../src/game/ai';
+
+test.describe('AI Difficulty Levels', () => {
+  test('should initialize players with medium difficulty by default', () => {
+    const players = [
+      { id: 1, type: 'human' as const, team: 1, name: 'P1' },
+      { id: 2, type: 'ai' as const, team: 2, name: 'P2' }
+    ];
+    const state = initializeGame({
+      numSystems: 4,
+      players
+    });
+    
+    expect(state.players[1].difficulty).toBe('medium');
+    expect(state.playerState[2].difficulty).toBe('medium');
+  });
+
+  test('should initialize players with chosen difficulty', () => {
+    const players = [
+      { id: 1, type: 'human' as const, team: 1, name: 'P1' },
+      { id: 2, type: 'ai' as const, team: 2, name: 'P2', difficulty: 'hard' as const },
+      { id: 3, type: 'ai' as const, team: 3, name: 'P3', difficulty: 'easy' as const }
+    ];
+    const state = initializeGame({
+      numSystems: 4,
+      players
+    });
+    
+    expect(state.players[1].difficulty).toBe('hard');
+    expect(state.playerState[2].difficulty).toBe('hard');
+    expect(state.players[2].difficulty).toBe('easy');
+    expect(state.playerState[3].difficulty).toBe('easy');
+  });
+
+  test('should apply resource bonus to hard AI on turn start', () => {
+    const players = [
+      { id: 1, type: 'human' as const, team: 1, name: 'P1' },
+      { id: 2, type: 'ai' as const, team: 2, name: 'P2', difficulty: 'hard' as const }
+    ];
+    const state = initializeGame({
+      numSystems: 4,
+      players
+    });
+
+    // Clear all systems owned by player 2 to prevent any upgrades/production spending
+    state.systems.forEach(sys => {
+      if (sys.owner === 2) {
+        sys.owner = 0;
+      }
+    });
+
+    const initialResources = state.playerState[2].resources;
+    runAITurn(state, 2);
+    // Hard AI gets +15 CR bonus and returns early due to 0 owned systems
+    expect(state.playerState[2].resources).toBe(initialResources + 15);
+  });
+
+  test('should initialize and respect custom AI config sliders', () => {
+    const players = [
+      { id: 1, type: 'human' as const, team: 1, name: 'P1' },
+      {
+        id: 2,
+        type: 'ai' as const,
+        team: 2,
+        name: 'P2',
+        difficulty: 'custom' as const,
+        aiConfig: { aggression: 40, expansion: 30, techFocus: 20, economyBonus: 25 }
+      }
+    ];
+    const state = initializeGame({
+      numSystems: 4,
+      players
+    });
+
+    expect(state.players[1].difficulty).toBe('custom');
+    expect(state.players[1].aiConfig?.economyBonus).toBe(25);
+    expect(state.playerState[2].difficulty).toBe('custom');
+    expect(state.playerState[2].aiConfig?.aggression).toBe(40);
+
+    // Clear owned systems to test economy bonus alone
+    state.systems.forEach(sys => {
+      if (sys.owner === 2) sys.owner = 0;
+    });
+
+    const initialResources = state.playerState[2].resources;
+    runAITurn(state, 2);
+    expect(state.playerState[2].resources).toBe(initialResources + 25);
+  });
+});

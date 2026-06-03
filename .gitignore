@@ -27,6 +27,7 @@ dist-ssr
 
 # Database
 *.db
+*.db.bak
 
 # Playwright
 playwright-report/
@@ -38,6 +39,14 @@ walkthrough.md
 # Build output
 out/
 out
+
+# Capacitor / Android generated files
+android/app/capacitor.build.gradle
+android/capacitor.settings.gradle
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
 
 
 

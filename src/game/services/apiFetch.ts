@@ -1,18 +1,18 @@
-import { isElectronMode } from '../../utils/env';
+import { isPackagedMode } from '../../utils/env';
 
 export function getServerUrl(): string {
   return localStorage.getItem('starswarm_server_url') || 'http://localhost:3001';
 }
 
 export function isOnlineMode(): boolean {
-  if (!isElectronMode()) {
+  if (!isPackagedMode()) {
     return true; // Web mode is always online
   }
   return localStorage.getItem('starswarm_play_online') === 'true';
 }
 
 export function getApiUrl(path: string): string {
-  if (isElectronMode() && isOnlineMode()) {
+  if (isPackagedMode() && isOnlineMode()) {
     const base = getServerUrl().replace(/\/$/, '');
     return `${base}${path}`;
   }

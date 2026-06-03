@@ -2,6 +2,13 @@
 
 export type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings' | 'terms' | 'privacy';
 
+export interface AIConfig {
+  aggression: number;   // 0 - 100
+  expansion: number;    // 0 - 100
+  techFocus: number;    // 0 - 100
+  economyBonus: number; // 0 - 30
+}
+
 export interface PlayerSetup {
   id: number;
   name: string;
@@ -11,6 +18,8 @@ export interface PlayerSetup {
   isLocal?: boolean;
   assignedEmail?: string | null;
   endedTurn?: boolean;
+  difficulty?: 'easy' | 'medium' | 'hard' | 'custom';
+  aiConfig?: AIConfig;
 }
 
 export interface GameNotification {

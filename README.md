@@ -14,7 +14,7 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
 - **Persistent User Accounts**: Secure server-side registration and authentication via SQLite database storage and password hashing.
 - **Integrated Google Sign-in**: Simulated OAuth account selector that links Gmail accounts automatically and tracks career victory telemetry.
 - **Secrecy Gate for Hotseat Multiplayer**: Screen lockdown and secrecy gates that hide sensor layouts and system statistics between turns to prevent screen-peeping during hotseat matches.
-- **Simulated AI Factions**: Automated skirmish opponents with intelligent expansion, system upgrades, and tactical fleet dispatches.
+- **Simulated AI Factions**: Choose between Easy (Novice), Medium (Standard), and Hard (Brutal) difficulty settings for each computer-controlled faction, featuring tailored upgrade, expansion, and aggression behaviors.
 - **Commander Profiles & Turn Recovery**: Customize global display names in the settings panel, rename factions, and manually rename game simulations mid-game. Instantly cancel accidentally ended turns from local/remote waiting screens or directly from the Concourse home screen.
 - **Sci-Fi Glassmorphic UI**: Premium retro-futuristic telemetry panels, real-time alerts, system dashboards, and diagnostic logs built with outfit typography. Includes an interactive notification stack alerting players of turn starts and finished production projects with click-to-locate integration, and interactive sound effects (turn starts, button hovers, and turn completions) with a mute toggle.
 - **Playwright Test Suite**: End-to-end integration tests that validate lobby configuration, Turn/HUD loops, AI progression, and rendering.
@@ -59,3 +59,15 @@ Star-Swarm is a premium browser-based turn-based tactical space strategy game. C
    ```bash
    npx playwright test
    ```
+
+5. **Package for Android (APK)**:
+   - Run the script to install JDK 21 and download/configure the Android SDK:
+     ```bash
+     ./setup_android_sdk.sh
+     ```
+   - Compile the Android APK:
+     ```bash
+     npm run package:apk
+     ```
+   - The compiled package will be available at `out/starswarm.apk`.
+

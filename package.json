@@ -1,7 +1,7 @@
 {
   "name": "starswarm",
   "private": true,
-  "version": "0.20.3",
+  "version": "0.22.0",
   "type": "module",
   "main": "main.cjs",
   "scripts": {
@@ -15,9 +15,14 @@
     "package:all": "npm run build && electron-packager . starswarm --all --out=out --overwrite",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy": "./deploy.sh"
+    "deploy": "./deploy.sh",
+    "android:init": "npx cap init \"Star-Swarm\" \"com.starswarm.game\" --web-dir=dist",
+    "android:add": "npx cap add android",
+    "android:sync": "npm run build && npx cap sync android",
+    "package:apk": "export ANDROID_HOME=/home/gemini/android-sdk && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 && export PATH=$PATH:$ANDROID_HOME/platform-tools && npm run android:sync && cd android && ./gradlew assembleDebug && mkdir -p ../out && cp app/build/outputs/apk/debug/app-debug.apk ../out/starswarm.apk"
   },
   "dependencies": {
+    "@capacitor/core": "^8.4.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -29,6 +34,8 @@
     "sqlite3": "^6.0.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/cli": "^8.4.0",
     "@electron/packager": "^20.0.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",

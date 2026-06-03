@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserAccount } from '../../game/auth';
-import { isElectronMode } from '../../utils/env';
+import { isPackagedMode } from '../../utils/env';
 
 interface AuthBarProps {
   currentUser: UserAccount | null;
@@ -227,7 +227,7 @@ export const AuthBar: React.FC<AuthBarProps> = ({
                 >
                   SETTINGS
                 </button>
-                {(!isElectronMode() || (currentUser && currentUser.email !== 'commander@local')) && (
+                {(!isPackagedMode() || (currentUser && currentUser.email !== 'commander@local')) && (
                   <button 
                     className="btn-sci-fi btn-danger" 
                     style={{ padding: '6px 12px', fontSize: '11px', justifyContent: 'flex-start', width: '100%' }} 
@@ -321,7 +321,7 @@ export const AuthBar: React.FC<AuthBarProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
-              {isElectronMode() ? 'OFFLINE COMMAND LINK' : 'COMMAND CODES ACTIVE'}
+              {isPackagedMode() ? 'OFFLINE COMMAND LINK' : 'COMMAND CODES ACTIVE'}
             </div>
             <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent-cyan)' }}>
               {currentUser.displayName || currentUser.email}
@@ -333,7 +333,7 @@ export const AuthBar: React.FC<AuthBarProps> = ({
           <button className="btn-sci-fi" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onNavigateSettings}>
             SETTINGS
           </button>
-          {(!isElectronMode() || (currentUser && currentUser.email !== 'commander@local')) && (
+          {(!isPackagedMode() || (currentUser && currentUser.email !== 'commander@local')) && (
             <button className="btn-sci-fi btn-danger" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onLogout}>
               LOG OUT
             </button>

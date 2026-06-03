@@ -18,3 +18,22 @@ export function isElectronMode(): boolean {
 
   return hasElectronUserAgent || isProcessElectron || isViteModeElectron;
 }
+
+/**
+ * Helper utility to detect if the application is running inside a Capacitor mobile shell.
+ */
+export function isCapacitorMode(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return !!(window as any).Capacitor || window.location.protocol === 'capacitor:';
+}
+
+/**
+ * Helper utility to detect if the application is running in a packaged local client environment
+ * (either Electron or Capacitor).
+ */
+export function isPackagedMode(): boolean {
+  return isElectronMode() || isCapacitorMode();
+}
+

@@ -1605,7 +1605,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         ) : (
                           <span>{player.name}</span>
                         )}
-                        {player.type === 'ai' && <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>[AI]</span>}
+                        {player.type === 'ai' && (
+                          <span style={{
+                            fontSize: '9px',
+                            padding: '1px 4px',
+                            borderRadius: '3px',
+                            background: player.difficulty === 'hard'
+                              ? 'rgba(255, 0, 127, 0.15)'
+                              : player.difficulty === 'easy'
+                                ? 'rgba(57, 255, 20, 0.15)'
+                                : 'rgba(0, 240, 255, 0.15)',
+                            border: player.difficulty === 'hard'
+                              ? '1px solid rgba(255, 0, 127, 0.3)'
+                              : player.difficulty === 'easy'
+                                ? '1px solid rgba(57, 255, 20, 0.3)'
+                                : '1px solid rgba(0, 240, 255, 0.3)',
+                            color: player.difficulty === 'hard'
+                              ? 'var(--accent-magenta)'
+                              : player.difficulty === 'easy'
+                                ? 'var(--accent-green)'
+                                : 'var(--accent-cyan)',
+                            fontFamily: 'Share Tech Mono',
+                            letterSpacing: '0.5px'
+                          }}>
+                            {player.difficulty ? player.difficulty.toUpperCase() : 'AI'}
+                          </span>
+                        )}
                         {isMe && <span style={{ fontSize: '9px', color: 'var(--accent-cyan)' }}>[YOU]</span>}
                       </div>
                       {player.type === 'human' && (

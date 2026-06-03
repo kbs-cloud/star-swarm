@@ -1,7 +1,7 @@
 import React from 'react';
 import { GameRules, FACTION_INFO } from '../../game/gameState';
 import { PlayerSetup } from '../../types';
-import { isElectronMode } from '../../utils/env';
+import { isPackagedMode } from '../../utils/env';
 
 interface LobbyScreenProps {
   gridSize: number;
@@ -357,11 +357,11 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
             {playersSetup.map((player, idx) => {
               const factionColor = player.color || FACTION_INFO[player.id]?.color || '#ffffff';
-              const isOfflineElectron = isElectronMode() && !playOnline;
+              const isOfflineElectron = isPackagedMode() && !playOnline;
               return (
                 <div key={player.id} style={{
                   display: 'grid',
-                  gridTemplateColumns: isOfflineElectron ? '24px 2fr 1fr 1.2fr 32px' : '24px 1.5fr 1fr 1fr 90px 2fr 32px',
+                  gridTemplateColumns: isOfflineElectron ? '24px 1.5fr 1fr 1fr 1.2fr 32px' : '24px 1.5fr 1fr 1fr 90px 2fr 32px',
                   gap: '8px',
                   alignItems: 'center',
                   background: 'rgba(255,255,255,0.02)',
@@ -405,7 +405,9 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                           ...copy[idx],
                           type: val,
                           isLocal: val === 'human',
-                          assignedEmail: val === 'human' ? '' : null
+                          assignedEmail: val === 'human' ? '' : null,
+                          difficulty: val === 'ai' ? 'medium' : undefined,
+                          aiConfig: val === 'ai' ? { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } : undefined
                         };
                         return copy;
                       });
@@ -446,49 +448,272 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                     </select>
                   </div>
 
-                  {/* Local Playable Checkbox */}
-                  {!isOfflineElectron && (
+                  {/* Local Playable & Assigned Email OR AI Difficulty Selector */}
+                  {!isOfflineElectron ? (
                     player.type === 'human' ? (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                      <>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!player.isLocal}
+                            disabled={idx === 0}
+                            onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
+                            style={{ accentColor: 'var(--accent-cyan)' }}
+                          />
+                          <span>LOCAL</span>
+                        </label>
                         <input
-                          type="checkbox"
-                          checked={!!player.isLocal}
+                          type="text"
+                          placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
+                          value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
                           disabled={idx === 0}
-                          onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
-                          style={{ accentColor: 'var(--accent-cyan)' }}
+                          onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
+                          style={{
+                            background: 'rgba(0,0,0,0.5)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            color: 'white',
+                            padding: '6px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            width: '100%',
+                            boxSizing: 'border-box'
+                          }}
                         />
-                        <span>LOCAL</span>
-                      </label>
+                      </>
                     ) : (
-                      <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center' }}>-</div>
+                      <div style={{ gridColumn: 'span 2', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>DIFFICULTY:</span>
+                        <select
+                          value={player.difficulty || 'medium'}
+                          onChange={(e) => {
+                            const diffVal = e.target.value;
+                            setPlayersSetup(prev => {
+                              const copy = [...prev];
+                              const playerCopy = { ...copy[idx] };
+                              playerCopy.difficulty = diffVal as any;
+                              
+                              if (diffVal === 'easy') {
+                                playerCopy.aiConfig = { aggression: 20, expansion: 20, techFocus: 15, economyBonus: 0 };
+                              } else if (diffVal === 'hard') {
+                                playerCopy.aiConfig = { aggression: 90, expansion: 90, techFocus: 90, economyBonus: 15 };
+                              } else if (diffVal === 'medium') {
+                                playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
+                              } else if (diffVal === 'custom' && !playerCopy.aiConfig) {
+                                playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
+                              }
+                              copy[idx] = playerCopy;
+                              return copy;
+                            });
+                          }}
+                          style={{
+                            background: 'rgba(0,0,0,0.8)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            color: 'white',
+                            padding: '6px 10px',
+                            borderRadius: '4px',
+                            fontSize: '13px',
+                            flex: 1
+                          }}
+                        >
+                          <option value="easy">🟢 Novice AI</option>
+                          <option value="medium">🟡 Standard AI</option>
+                          <option value="hard">🔴 Brutal AI</option>
+                          <option value="custom">⚙️ Custom Setup</option>
+                        </select>
+                      </div>
                     )
-                  )}
-
-                  {/* Assigned Email */}
-                  {!isOfflineElectron && (
+                  ) : (
                     player.type === 'human' ? (
-                      <input
-                        type="text"
-                        placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
-                        value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
-                        disabled={idx === 0}
-                        onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
+                      <div />
+                    ) : (
+                      <select
+                        value={player.difficulty || 'medium'}
+                        onChange={(e) => {
+                          const diffVal = e.target.value;
+                          setPlayersSetup(prev => {
+                            const copy = [...prev];
+                            const playerCopy = { ...copy[idx] };
+                            playerCopy.difficulty = diffVal as any;
+                            
+                            if (diffVal === 'easy') {
+                              playerCopy.aiConfig = { aggression: 20, expansion: 20, techFocus: 15, economyBonus: 0 };
+                            } else if (diffVal === 'hard') {
+                              playerCopy.aiConfig = { aggression: 90, expansion: 90, techFocus: 90, economyBonus: 15 };
+                            } else if (diffVal === 'medium') {
+                              playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
+                            } else if (diffVal === 'custom' && !playerCopy.aiConfig) {
+                              playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
+                            }
+                            copy[idx] = playerCopy;
+                            return copy;
+                          });
+                        }}
                         style={{
-                          background: 'rgba(0,0,0,0.5)',
+                          background: 'rgba(0,0,0,0.8)',
                           border: '1px solid rgba(255,255,255,0.1)',
                           color: 'white',
-                          padding: '6px 8px',
+                          padding: '6px 10px',
                           borderRadius: '4px',
-                          fontSize: '12px',
-                          width: '100%',
-                          boxSizing: 'border-box'
+                          fontSize: '13px',
+                          width: '100%'
                         }}
-                      />
-                    ) : (
-                      <div style={{ color: 'var(--text-muted)', fontSize: '11px', textAlign: 'center', fontFamily: 'Share Tech Mono' }}>[AI SYSTEM]</div>
+                      >
+                        <option value="easy">🟢 Novice AI</option>
+                        <option value="medium">🟡 Standard AI</option>
+                        <option value="hard">🔴 Brutal AI</option>
+                        <option value="custom">⚙️ Custom Setup</option>
+                      </select>
                     )
                   )}
  
+                  {/* Custom AI Config Sliders Panel */}
+                  {player.type === 'ai' && player.difficulty === 'custom' && (
+                    <div style={{
+                      gridColumn: '1 / -1',
+                      background: 'rgba(0, 0, 0, 0.45)',
+                      border: '1px solid rgba(0, 240, 255, 0.2)',
+                      boxShadow: '0 0 10px rgba(0, 240, 255, 0.05)',
+                      padding: '12px 16px',
+                      borderRadius: '6px',
+                      marginTop: '8px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                    }}>
+                      <div style={{
+                        fontSize: '11px',
+                        color: 'var(--accent-cyan)',
+                        fontFamily: 'Orbitron',
+                        letterSpacing: '1px',
+                        fontWeight: 'bold',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}>
+                        <span>⚙️</span> CUSTOM INTELLIGENCE SUBSYSTEMS
+                      </div>
+
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: '12px 20px',
+                        fontSize: '12px'
+                      }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                            <span>Aggression / Offensive Drive</span>
+                            <span className="telemetry" style={{ color: 'var(--accent-cyan)' }}>{player.aiConfig?.aggression ?? 50}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={player.aiConfig?.aggression ?? 50}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setPlayersSetup(prev => {
+                                const copy = [...prev];
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  aiConfig: {
+                                    ...(copy[idx].aiConfig || { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 }),
+                                    aggression: val
+                                  }
+                                };
+                                return copy;
+                              });
+                            }}
+                            style={{ width: '100%', accentColor: 'var(--accent-cyan)' }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                            <span>Expansion / Annexation Range</span>
+                            <span className="telemetry" style={{ color: 'var(--accent-cyan)' }}>{player.aiConfig?.expansion ?? 50}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={player.aiConfig?.expansion ?? 50}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setPlayersSetup(prev => {
+                                const copy = [...prev];
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  aiConfig: {
+                                    ...(copy[idx].aiConfig || { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 }),
+                                    expansion: val
+                                  }
+                                };
+                                return copy;
+                              });
+                            }}
+                            style={{ width: '100%', accentColor: 'var(--accent-cyan)' }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                            <span>Upgrade Focus / Tech Upgrade Rate</span>
+                            <span className="telemetry" style={{ color: 'var(--accent-cyan)' }}>{player.aiConfig?.techFocus ?? 50}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={player.aiConfig?.techFocus ?? 50}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setPlayersSetup(prev => {
+                                const copy = [...prev];
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  aiConfig: {
+                                    ...(copy[idx].aiConfig || { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 }),
+                                    techFocus: val
+                                  }
+                                };
+                                return copy;
+                              });
+                            }}
+                            style={{ width: '100%', accentColor: 'var(--accent-cyan)' }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                            <span>Economy / Credits Yield per turn</span>
+                            <span className="telemetry" style={{ color: 'var(--accent-green)' }}>+{player.aiConfig?.economyBonus ?? 0} CR</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="30"
+                            value={player.aiConfig?.economyBonus ?? 0}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setPlayersSetup(prev => {
+                                const copy = [...prev];
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  aiConfig: {
+                                    ...(copy[idx].aiConfig || { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 }),
+                                    economyBonus: val
+                                  }
+                                };
+                                return copy;
+                              });
+                            }}
+                            style={{ width: '100%', accentColor: 'var(--accent-green)' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Remove Button */}
                   {idx > 0 && playersSetup.length > 2 ? (
                     <button

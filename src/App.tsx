@@ -1,6 +1,6 @@
 import { PlayerSetup } from './types';
 import React, { useState, useRef, useEffect } from 'react';
-import { isElectronMode } from './utils/env';
+import { isElectronMode, isPackagedMode } from './utils/env';
 import {
   GameState,
   StarSystem,
@@ -403,12 +403,11 @@ export default function App() {
   const [connectedPlayers, setConnectedPlayers] = useState<string[]>([]);
   const [gameOwnerEmail, setGameOwnerEmail] = useState<string | null>(null);
 
-  // Players configuration setup
   const [playersSetup, setPlayersSetup] = useState<PlayerSetup[]>([
     { id: 1, name: 'Vanguard (You)', type: 'human', team: 1, color: '#00f0ff', isLocal: true, assignedEmail: null, endedTurn: false },
-    { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false },
-    { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false },
-    { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false }
+    { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false, difficulty: 'medium', aiConfig: { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } },
+    { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false, difficulty: 'medium', aiConfig: { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } },
+    { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false, difficulty: 'medium', aiConfig: { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } }
   ]);
 
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -803,7 +802,7 @@ export default function App() {
     setCompactMode(settingsCompactMode);
 
     let effectiveUser = currentUser;
-    if (isElectronMode()) {
+    if (isPackagedMode()) {
       const prevPlayOnline = localStorage.getItem('starswarm_play_online') === 'true';
       const playOnlineChanged = prevPlayOnline !== settingsPlayOnline;
 
@@ -839,7 +838,7 @@ export default function App() {
       }
     }
 
-    const isOnline = !isElectronMode() || settingsPlayOnline;
+    const isOnline = !isPackagedMode() || settingsPlayOnline;
     const isRealUser = effectiveUser && effectiveUser.email !== 'commander@local';
 
     if (isOnline && isRealUser) {
@@ -1024,7 +1023,7 @@ export default function App() {
 
   // Poll for Google Sign-in completion in Electron
   React.useEffect(() => {
-    if (!isElectronMode()) return;
+    if (!isPackagedMode()) return;
 
     let active = true;
     let pollInterval: NodeJS.Timeout | null = null;
@@ -1140,7 +1139,7 @@ export default function App() {
 
   // Periodic polling loop for game state & presence updates
   React.useEffect(() => {
-    if (!activeGameId || screen !== 'game' || isElectronMode()) return;
+    if (!activeGameId || screen !== 'game' || (isPackagedMode() && !playOnline)) return;
 
     let isSubscribed = true;
     const poll = async () => {
@@ -1753,9 +1752,9 @@ export default function App() {
     const localName = currentUser?.displayName || localStorage.getItem('starswarm_display_name') || 'Vanguard (You)';
     const newSetup: PlayerSetup[] = [
       { id: 1, name: localName, type: 'human', team: 1, color: '#00f0ff', isLocal: true, assignedEmail: ownerEmail, endedTurn: false },
-      { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false },
-      { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false },
-      { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false }
+      { id: 2, name: 'Nebula AI', type: 'ai', team: 2, color: '#ff007f', isLocal: false, assignedEmail: null, endedTurn: false, difficulty: 'medium', aiConfig: { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } },
+      { id: 3, name: 'Solar AI', type: 'ai', team: 3, color: '#ffaa00', isLocal: false, assignedEmail: null, endedTurn: false, difficulty: 'medium', aiConfig: { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } },
+      { id: 4, name: 'Void AI', type: 'ai', team: 4, color: '#39ff14', isLocal: false, assignedEmail: null, endedTurn: false, difficulty: 'medium', aiConfig: { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } }
     ];
     setPlayersSetup(newSetup);
     setGameMode('skirmish');

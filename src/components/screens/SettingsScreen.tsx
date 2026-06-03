@@ -1,7 +1,8 @@
 import React from 'react';
 import { UserAccount } from '../../game/auth';
 import { updatePassword } from '../../game/gameApi';
-import { isElectronMode } from '../../utils/env';
+import { isPackagedMode } from '../../utils/env';
+
 
 
 interface SettingsScreenProps {
@@ -176,8 +177,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </label>
         </div>
 
-        {/* Server Connection Options (Only in Electron Mode) */}
-        {isElectronMode() && (
+        {/* Server Connection Options (Only in Packaged Mode) */}
+        {isPackagedMode() && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '15px' }}>
             <h3 style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
               Server Connection Setup
