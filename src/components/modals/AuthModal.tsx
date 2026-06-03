@@ -1,4 +1,5 @@
 import React from 'react';
+import { isPackagedMode, isCapacitorMode } from '../../utils/env';
 
 
 interface AuthModalProps {
@@ -271,21 +272,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 let stateParam = window.location.search;
                 const playOnline = localStorage.getItem('starswarm_play_online') === 'true';
                 const serverUrl = localStorage.getItem('starswarm_server_url') || 'http://localhost:3001';
-                const isElectron = window.navigator.userAgent.toLowerCase().includes('electron') ||
-                  !!((window as any).process && (window as any).process.versions && (window as any).process.versions.electron);
+                const isPackaged = isPackagedMode();
 
-                if (isElectron) {
+                if (isPackaged) {
                   const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
                   localStorage.setItem('starswarm_auth_pending_token', token);
 
                   const params = new URLSearchParams(stateParam);
-                  params.set('source', 'electron');
+                  params.set('source', 'electron'); // Tell the server to render the polling HTML page
                   params.set('token', token);
                   stateParam = '?' + params.toString();
                 }
 
-                const base = (isElectron && playOnline) ? serverUrl.replace(/\/$/, '') : '';
-                window.location.href = `${base}/api/auth/google?state=${encodeURIComponent(stateParam)}`;
+                const base = (isPackaged && playOnline) ? serverUrl.replace(/\/$/, '') : '';
+                const targetUrl = `${base}/api/auth/google?state=${encodeURIComponent(stateParam)}`;
+
+                if (isCapacitorMode()) {
+                  window.open(targetUrl, '_system');
+                } else {
+                  window.location.href = targetUrl;
+                }
               }}
             >
               <svg width="18" height="18" viewBox="0 0 18 18" style={{ marginRight: '8px' }}>
