@@ -1,6 +1,6 @@
 import { PlayerSetup } from './types';
 import React, { useState, useRef, useEffect } from 'react';
-import { isElectronMode, isPackagedMode, isCapacitorMode } from './utils/env';
+import { isPackagedMode, isCapacitorMode } from './utils/env';
 import {
   GameState,
   StarSystem,
@@ -83,6 +83,14 @@ const StarNestBackground = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
+  const timeRef = useRef<number>(performance.now());
+  const onAutoDetectLowPerfRef = useRef(onAutoDetectLowPerf);
+
+  useEffect(() => {
+    onAutoDetectLowPerfRef.current = onAutoDetectLowPerf;
+  }, [onAutoDetectLowPerf]);
+
+  const isVisible = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
 
   // Define shaders as strings outside the component or in a constant
   const vsSource = `
@@ -157,7 +165,7 @@ const StarNestBackground = ({
 
   useEffect(() => {
     // Only initialize if we are on a valid screen
-    const validScreens = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'];
+    // const validScreens = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'];
     //if (!validScreens.includes(screen)) return;
 
     const canvas = canvasRef.current;
@@ -230,7 +238,11 @@ const StarNestBackground = ({
         }
       }
 
-      gl.uniform1f(timeLoc, time * 0.001);
+      if (!staticBg) {
+        timeRef.current = time;
+      }
+
+      gl.uniform1f(timeLoc, timeRef.current * 0.001);
       gl.uniform2f(resLoc, canvas.width, canvas.height);
 
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -248,7 +260,7 @@ const StarNestBackground = ({
             frameTimes.shift();
             const avgFrameTime = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
             if (avgFrameTime > 45) {
-              onAutoDetectLowPerf();
+              onAutoDetectLowPerfRef.current();
             }
           }
         }
@@ -272,9 +284,7 @@ const StarNestBackground = ({
       cancelAnimationFrame(requestRef.current || 0);
       window.removeEventListener('resize', handleResize);
     };
-  }, [screen, staticBg, onAutoDetectLowPerf]); // Re-run if screen or performance settings change
-
-  const isVisible = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
+  }, [isVisible, staticBg]); // Re-run if screen visibility or staticBg changes
 
   return isVisible ? (
     <div style={{
