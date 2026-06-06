@@ -32,6 +32,8 @@ interface DashboardProps {
   onRenameGame: (newName: string) => void;
   soundMuted: boolean;
   onToggleSoundMuted: () => void;
+  staticBg: boolean;
+  onToggleStaticBg: () => void;
   compactMode: boolean;
   isMobile: boolean;
   activeMobileTab: 'map' | 'empire' | 'tactics';
@@ -71,6 +73,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onRenameGame,
   soundMuted,
   onToggleSoundMuted,
+  staticBg,
+  onToggleStaticBg,
   compactMode,
   isMobile,
   activeMobileTab,
@@ -478,6 +482,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
               >
                 {soundMuted ? '🔇' : '🔊'}
               </button>
+              <button 
+                className="btn-sci-fi" 
+                onClick={onToggleStaticBg} 
+                style={{ padding: window.innerHeight <= 480 ? '3px 6px' : '6px 8px', fontSize: window.innerHeight <= 480 ? '10px' : '11px' }}
+                title={staticBg ? "Animate Background" : "Freeze Background (Save CPU)"}
+              >
+                {staticBg ? '🖼️' : '🌀'}
+              </button>
               <button className="btn-sci-fi btn-danger" onClick={onReturnToMenu} style={{ padding: window.innerHeight <= 480 ? '3px 8px' : '6px 10px', fontSize: window.innerHeight <= 480 ? '10px' : '11px', fontWeight: 'bold' }}>
                 HOME
               </button>
@@ -774,6 +786,39 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                  </svg>
+                )}
+              </button>
+              <button
+                className="btn-sci-fi"
+                onClick={onToggleStaticBg}
+                style={{ 
+                  padding: '12px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  width: '45px',
+                  height: '45px',
+                  minWidth: '45px'
+                }}
+                title={staticBg ? "Enable Animated Background" : "Freeze Background (Save CPU)"}
+              >
+                {staticBg ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                    <line x1="7" y1="2" x2="7" y2="22"></line>
+                    <line x1="17" y1="2" x2="17" y2="22"></line>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <line x1="2" y1="7" x2="7" y2="7"></line>
+                    <line x1="2" y1="17" x2="7" y2="17"></line>
+                    <line x1="17" y1="17" x2="22" y2="17"></line>
+                    <line x1="17" y1="7" x2="22" y2="7"></line>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
                   </svg>
                 )}
               </button>

@@ -6,6 +6,8 @@ interface AuthBarProps {
   currentUser: UserAccount | null;
   soundMuted: boolean;
   onToggleSoundMuted: () => void;
+  staticBg: boolean;
+  onToggleStaticBg: () => void;
   onOpenAuth: () => void;
   onLogout: () => void;
   onNavigateSettings: () => void;
@@ -16,6 +18,8 @@ export const AuthBar: React.FC<AuthBarProps> = ({
   currentUser,
   soundMuted,
   onToggleSoundMuted,
+  staticBg,
+  onToggleStaticBg,
   onOpenAuth,
   onLogout,
   onNavigateSettings,
@@ -215,6 +219,46 @@ export const AuthBar: React.FC<AuthBarProps> = ({
               )}
             </button>
 
+            {/* BACKGROUND PERFORMANCE TOGGLE */}
+            <button
+              className="btn-sci-fi"
+              onClick={onToggleStaticBg}
+              style={{
+                padding: '6px 12px',
+                fontSize: '11px',
+                justifyContent: 'flex-start',
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              {staticBg ? (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                    <line x1="7" y1="2" x2="7" y2="22"></line>
+                    <line x1="17" y1="2" x2="17" y2="22"></line>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <line x1="2" y1="7" x2="7" y2="7"></line>
+                    <line x1="2" y1="17" x2="7" y2="17"></line>
+                    <line x1="17" y1="17" x2="22" y2="17"></line>
+                    <line x1="17" y1="7" x2="22" y2="7"></line>
+                  </svg>
+                  <span>ANIMATE BG</span>
+                </>
+              ) : (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                  <span>FREEZE BG</span>
+                </>
+              )}
+            </button>
+
             {currentUser ? (
               <>
                 <button 
@@ -313,6 +357,42 @@ export const AuthBar: React.FC<AuthBarProps> = ({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
             <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+        )}
+      </button>
+
+      {/* BACKGROUND PERFORMANCE TOGGLE */}
+      <button
+        className="btn-sci-fi"
+        onClick={onToggleStaticBg}
+        style={{
+          padding: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '32px',
+          height: '32px',
+          minWidth: '32px',
+          borderRadius: '6px'
+        }}
+        title={staticBg ? 'Enable Animated Background' : 'Freeze Background (Save CPU)'}
+      >
+        {staticBg ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+            <line x1="7" y1="2" x2="7" y2="22"></line>
+            <line x1="17" y1="2" x2="17" y2="22"></line>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <line x1="2" y1="7" x2="7" y2="7"></line>
+            <line x1="2" y1="17" x2="7" y2="17"></line>
+            <line x1="17" y1="17" x2="22" y2="17"></line>
+            <line x1="17" y1="7" x2="22" y2="7"></line>
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
           </svg>
         )}
       </button>

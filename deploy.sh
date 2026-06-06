@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-echo "=== Starting deployment to ~/live/starswarm ==="
+echo "=== Starting deployment to /servers/starswarm ==="
 
-# 1. Sync files from Public/starswarm to live/starswarm
+# 1. Sync files from repos to /servers/starswarm
 echo "Syncing files..."
 sudo rsync -av --delete \
   --exclude 'node_modules/' \
@@ -11,11 +11,11 @@ sudo rsync -av --delete \
   --exclude 'starswarm.db' \
   --exclude 'test-results/' \
   --exclude '.env' \
-  /home/gemini/Public/starswarm/ /home/gemini/live/starswarm/
+  /home/gemini/repos/kbs-cloud/starswarm/ /servers/starswarm/
 
 # 2. Install/update dependencies in live directory
 echo "Installing dependencies in production directory..."
-cd /home/gemini/live/starswarm
+cd /servers/starswarm
 /home/gemini/.nvm/versions/node/v24.16.0/bin/npm install
 
 # 3. Restart the systemd user service

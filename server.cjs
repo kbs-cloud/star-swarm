@@ -1,4 +1,15 @@
 // Star-Swarm Express Backend & SQLite Database Server
+try {
+  const fs = require('fs');
+  const path = require('path');
+  const envPath = path.resolve(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    process.loadEnvFile(envPath);
+  }
+} catch (e) {
+  console.warn('Failed to load local environment file:', e.message);
+}
+
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
@@ -22,7 +33,7 @@ const {
 const { runAITurn } = require('./src/game/dist/ai.js');
 
 const app = express();
-const PORT = process.env.BACKEND_PORT || process.env.PORT || 3001;
+const PORT = process.env.BACKEND_PORT || process.env.PORT || 29002;
 app.set('trust proxy', 1);
 
 // Database Connection
@@ -191,7 +202,13 @@ app.use(cors({
     if (!origin || origin === 'null' || origin.startsWith('file://')) {
       return callback(null, true);
     }
-    const allowedOrigins = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://localhost:5173', 'http://127.0.0.1:5173'];
+    const allowedOrigins = [
+      'http://localhost:8080', 'http://127.0.0.1:8080',
+      'http://localhost:19000', 'http://127.0.0.1:19000',
+      'http://localhost:19001', 'http://127.0.0.1:19001',
+      'http://localhost:19002', 'http://127.0.0.1:19002',
+      'http://localhost:19003', 'http://127.0.0.1:19003'
+    ];
     if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
       return callback(null, true);
     }
@@ -268,25 +285,47 @@ function validateCSRF(req, res, next) {
 
 // Session Validation Helper
 function getSessionUser(req, callback) {
-  const sessionId = req.headers['x-session-id'] || req.cookies['session_id'];
-  if (!sessionId) {
+  const headerSessionId = req.headers['x-session-id'];
+  const cookieSessionId = req.cookies['session_id'];
+
+  if (!headerSessionId && !cookieSessionId) {
     return callback(null, null);
   }
 
   const now = new Date().toISOString();
-  db.get(
-    `SELECT s.csrf_token, u.email, u.display_name, u.is_google_linked, u.games_played, u.games_won, u.password_hash 
-     FROM sessions s 
-     JOIN users u ON s.email = u.email 
-     WHERE s.id = ? AND s.expires_at > ?`,
-    [sessionId, now],
-    (err, row) => {
-      if (err || !row) {
-        return callback(null, null);
+
+  const querySession = (sid, next) => {
+    db.get(
+      `SELECT s.csrf_token, u.email, u.display_name, u.is_google_linked, u.games_played, u.games_won, u.password_hash 
+       FROM sessions s 
+       JOIN users u ON s.email = u.email 
+       WHERE s.id = ? AND s.expires_at > ?`,
+      [sid, now],
+      (err, row) => {
+        if (err || !row) return next(null);
+        next(row);
       }
-      callback(null, row);
-    }
-  );
+    );
+  };
+
+  if (headerSessionId) {
+    querySession(headerSessionId, (user) => {
+      if (user) {
+        return callback(null, user);
+      }
+      if (cookieSessionId) {
+        querySession(cookieSessionId, (cookieUser) => {
+          callback(null, cookieUser);
+        });
+      } else {
+        callback(null, null);
+      }
+    });
+  } else {
+    querySession(cookieSessionId, (user) => {
+      callback(null, user);
+    });
+  }
 }
 
 // In-memory presence store
@@ -352,111 +391,99 @@ app.param('gameId', (req, res, next, gameId) => {
   });
 });
 
-// Endpoint: Register new user
-app.post('/api/register', validateCSRF, (req, res) => {
-  const { email, password } = req.body;
+// Endpoint: SSO Auth Callback redirect
+app.get('/api/auth/callback', async (req, res) => {
+  console.log('[/api/auth/callback] Incoming request. Query:', req.query, 'Headers:', req.headers, 'Cookies:', req.cookies);
+  const { code, state } = req.query;
 
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ error: 'Invalid email address.' });
-  }
-  if (!password || password.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  if (!code) {
+    return res.status(400).send('Missing authorization code.');
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const stateParams = new URLSearchParams(state || '');
+  const isElectron = stateParams.get('source') === 'electron';
+  const token = stateParams.get('token') || '';
 
-  db.run(
-    'INSERT INTO users (email, password_hash, is_google_linked) VALUES (?, ?, 0)',
-    [normalizedEmail, passwordHash],
-    function (err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: 'An account with this email already exists.' });
-        }
-        return res.status(500).json({ error: 'Database registration error.' });
-      }
-      res.status(201).json({ success: true, message: 'Account registered successfully.' });
-    }
-  );
-});
+  try {
+    // Exchange the authorization code with kbs-auth server
+    const authServerUrl = process.env.AUTH_SERVER_URL || 'http://localhost:29001';
+    const tokenRes = await fetch(`${authServerUrl}/api/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, client_id: 'starswarm' })
+    });
 
-// Endpoint: Traditional login
-app.post('/api/login', validateCSRF, (req, res) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Please provide email and password.' });
-  }
-
-  const normalizedEmail = email.trim().toLowerCase();
-
-  db.get('SELECT * FROM users WHERE email = ?', [normalizedEmail], (err, user) => {
-    if (err || !user) {
-      return res.status(400).json({ error: 'Account not found. Please register first.' });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.success) {
+      throw new Error(tokenData.error || 'Failed to exchange auth token.');
     }
 
-    if (!user.password_hash) {
-      return res.status(400).json({
-        error: 'This account was created with Google Sign-in. Please click "Sign in with Google" to access it.'
-      });
-    }
+    const { email, displayName } = tokenData.user;
+    const finalDisplayName = displayName || email.split('@')[0];
 
-    const isMatch = bcrypt.compareSync(password, user.password_hash);
-    if (!isMatch) {
-      return res.status(400).json({ error: 'Incorrect password.' });
-    }
+    db.get('SELECT email FROM users WHERE email = ?', [email], (err, user) => {
+      const finalizeLogin = () => {
+        const sessionId = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        const csrfToken = req.cookies['csrf_token'] || crypto.randomBytes(24).toString('hex');
 
-    // Create session
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // 2 hours expiration
-    const csrfToken = req.cookies['csrf_token'] || crypto.randomBytes(24).toString('hex');
+        db.run(
+          'INSERT INTO sessions (id, email, expires_at, csrf_token) VALUES (?, ?, ?, ?)',
+          [sessionId, email, expiresAt, csrfToken],
+          (sessionErr) => {
+            if (sessionErr) {
+              if (isElectron && token) {
+                pendingAuths.set(token, { error: 'session_fail', createdAt: Date.now() });
+                return renderAuthResponseHtml(res, 'Star-Swarm Session Error', 'SESSION DEPLOYMENT FAILURE', 'Failed to generate user commander session.', false);
+              }
+              return res.redirect('/login?error=session_fail');
+            }
 
-    db.run(
-      'INSERT INTO sessions (id, email, expires_at, csrf_token) VALUES (?, ?, ?, ?)',
-      [sessionId, normalizedEmail, expiresAt, csrfToken],
-      (sessionErr) => {
-        if (sessionErr) {
-          return res.status(500).json({ error: 'Failed to create active session.' });
-        }
+            res.cookie('session_id', sessionId, {
+              httpOnly: true,
+              path: '/',
+              sameSite: 'lax',
+              secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+              maxAge: 2 * 60 * 60 * 1000
+            });
 
-        // Set HttpOnly cookie
-        res.cookie('session_id', sessionId, {
-          httpOnly: true,
-          sameSite: 'lax',
-          secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
-          maxAge: 2 * 60 * 60 * 1000 // 2 hours
-        });
+            if (isElectron && token) {
+              pendingAuths.set(token, { sessionId, createdAt: Date.now() });
+              return renderAuthResponseHtml(res, 'Star-Swarm Authenticated', 'COMMAND PROTOCOL ESTABLISHED', 'Commander authenticated successfully. You can now close this tab and return to the Star-Swarm game console.', true);
+            }
 
-        res.status(200).json({
-          success: true,
-          sessionId,
-          user: {
-            email: user.email,
-            displayName: user.display_name || null,
-            isGoogleLinked: user.is_google_linked === 1,
-            hasPassword: user.password_hash !== null,
-            stats: { gamesPlayed: user.games_played, gamesWon: user.games_won }
+            res.redirect('/');
           }
+        );
+      };
+
+      if (user) {
+        db.run('UPDATE users SET display_name = ? WHERE email = ?', [finalDisplayName, email], () => {
+          finalizeLogin();
         });
+      } else {
+        db.run(
+          'INSERT INTO users (email, password_hash, is_google_linked, display_name) VALUES (?, NULL, 0, ?)',
+          [email, finalDisplayName],
+          () => {
+            finalizeLogin();
+          }
+        );
       }
-    );
-  });
+    });
+  } catch (error) {
+    console.error('SSO callback exchange failed:', error);
+    if (isElectron && token) {
+      pendingAuths.set(token, { error: 'oauth_failed', createdAt: Date.now() });
+      return renderAuthResponseHtml(res, 'Star-Swarm Auth Error', 'AUTHENTICATION FAILURE', 'Failed to link SSO session.', false);
+    }
+    res.redirect('/login?error=sso_failed');
+  }
 });
 
-const { OAuth2Client } = require('google-auth-library');
-
-// Initialize Google Client
-const client = new OAuth2Client(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_CALLBACK_URL
-);
-
-// Endpoint: Check if real Google OAuth is configured on the backend
+// Endpoint: Check if real Google OAuth is configured (Disabled locally, delegated to SSO)
 app.get('/api/auth/google/config', (req, res) => {
-  const isConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-  res.status(200).json({ enabled: isConfigured });
+  res.status(200).json({ enabled: true });
 });
 
 // Endpoint: Poll for Electron browser authentication status
@@ -479,18 +506,6 @@ app.get('/api/auth/poll', (req, res) => {
   // Success: return session ID
   pendingAuths.delete(token);
   return res.status(200).json({ status: 'success', sessionId: auth.sessionId });
-});
-
-
-// 1. Redirect User to Google
-app.get('/api/auth/google', (req, res) => {
-  const state = req.query.state || '';
-  const url = client.generateAuthUrl({
-    access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/userinfo.email', 'profile'],
-    state: state
-  });
-  res.redirect(url);
 });
 
 // Helper to render sci-fi themed HTML auth pages for Electron login browser flows
@@ -554,104 +569,9 @@ function renderAuthResponseHtml(res, title, header, message, isSuccess) {
   `);
 }
 
-// 2. Handle the Callback from Google
-app.get('/api/auth/callback/google', async (req, res) => {
-  const { code, state } = req.query;
-
-  const stateParams = new URLSearchParams(state || '');
-  const isElectron = stateParams.get('source') === 'electron';
-  const token = stateParams.get('token') || '';
-
-  try {
-    // Exchange code for tokens
-    const { tokens } = await client.getToken(code);
-    client.setCredentials(tokens);
-
-    // Get user info (email)
-    const ticket = await client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    const email = payload.email.toLowerCase();
-    const displayName = payload.name;
-
-    // Use your existing logic to find or create the user [cite: 57, 58]
-    db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
-      if (user) {
-        if (user.is_google_linked === 0) {
-          db.run('UPDATE users SET is_google_linked = 1 WHERE email = ?', [email]);
-        }
-        finalizeOAuthLogin(req, res, user.email, user.games_played, user.games_won, 1, user.display_name || displayName, user.password_hash !== null, state);
-      } else {
-        db.run(
-          'INSERT INTO users (email, password_hash, is_google_linked, display_name) VALUES (?, NULL, 1, ?)',
-          [email, displayName],
-          function (insertErr) {
-            if (insertErr) {
-              if (isElectron && token) {
-                pendingAuths.set(token, { error: 'db_fail', createdAt: Date.now() });
-                return renderAuthResponseHtml(res, 'Star-Swarm Command Error', 'CONNECTION FAILURE', 'Database link operation failed.', false);
-              }
-              return res.redirect('/login?error=db_fail');
-            }
-            finalizeOAuthLogin(req, res, email, 0, 0, 1, displayName, false, state);
-          }
-        );
-      }
-    });
-  } catch (error) {
-    console.error('Google OAuth Error:', error);
-    if (isElectron && token) {
-      pendingAuths.set(token, { error: 'oauth_failed', createdAt: Date.now() });
-      return renderAuthResponseHtml(res, 'Star-Swarm OAuth Error', 'AUTHENTICATION FAILURE', 'Google OAuth callback link verification failed.', false);
-    }
-    res.redirect('/login?error=oauth_failed');
-  }
-});
-
-// Helper to set session cookies (Refactored from your original createAndSendSession)
-function finalizeOAuthLogin(req, res, userEmail, gamesPlayed, gamesWon, isGoogleLinked, displayName, hasPassword, state) {
-  const sessionId = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-  const csrfToken = crypto.randomBytes(24).toString('hex');
-
-  const stateParams = new URLSearchParams(state || '');
-  const isElectron = stateParams.get('source') === 'electron';
-  const token = stateParams.get('token') || '';
-
-  db.run(
-    'INSERT INTO sessions (id, email, expires_at, csrf_token) VALUES (?, ?, ?, ?)',
-    [sessionId, userEmail, expiresAt, csrfToken],
-    (err) => {
-      if (err) {
-        if (isElectron && token) {
-          pendingAuths.set(token, { error: 'session_fail', createdAt: Date.now() });
-          return renderAuthResponseHtml(res, 'Star-Swarm Session Error', 'SESSION DEPLOYMENT FAILURE', 'Failed to generate user commander session.', false);
-        }
-        return res.redirect('/login?error=session_fail');
-      }
-
-      res.cookie('session_id', sessionId, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
-        maxAge: 2 * 60 * 60 * 1000
-      });
-
-      if (isElectron && token) {
-        pendingAuths.set(token, { sessionId, createdAt: Date.now() });
-        return renderAuthResponseHtml(res, 'Star-Swarm Authenticated', 'COMMAND PROTOCOL ESTABLISHED', 'Commander authenticated successfully. You can now close this tab and return to the Star-Swarm game console.', true);
-      }
-
-      // Redirect back to the frontend dashboard or home, preserving state query params
-      res.redirect('/' + (state ? state : ''));
-    }
-  );
-}
-
 // Endpoint: Get current user session details
 app.get('/api/me', (req, res) => {
+  console.log('[/api/me] Incoming request. Headers:', req.headers, 'Cookies:', req.cookies);
   getSessionUser(req, (err, user) => {
     if (err || !user) {
       return res.status(401).json({ error: 'Unauthorized. No active session.' });
@@ -695,46 +615,34 @@ app.put('/api/settings', validateCSRF, (req, res) => {
   });
 });
 
-// Endpoint: Change user password securely
+// Endpoint: Change user password (disabled, managed centrally)
 app.put('/api/settings/password', validateCSRF, (req, res) => {
-  getSessionUser(req, (err, user) => {
-    if (err || !user) {
-      return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
-
-    const { newPassword } = req.body;
-
-    if (!newPassword) {
-      return res.status(400).json({ error: 'Please provide a new password.' });
-    }
-
-    if (newPassword.length < 8) {
-      return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
-    }
-
-    // TODO(security): The user explicitly requested to never require current password for password changes.
-    const newPasswordHash = bcrypt.hashSync(newPassword, 10);
-    db.run(
-      'UPDATE users SET password_hash = ? WHERE email = ?',
-      [newPasswordHash, user.email],
-      function (updErr) {
-        if (updErr) {
-          console.error('Error updating password:', updErr.message);
-          return res.status(500).json({ error: 'Failed to update password.' });
-        }
-
-        // Invalidate all active sessions for this user
-        db.run('DELETE FROM sessions WHERE email = ?', [user.email], (delErr) => {
-          if (delErr) {
-            console.error('Error invalidating sessions:', delErr.message);
-          }
-          res.clearCookie('session_id');
-          res.status(200).json({ success: true, message: 'Password updated successfully. All sessions invalidated.' });
-        });
-      }
-    );
-  });
+  res.status(400).json({ error: 'Passwords must be updated centrally on the KBS Auth portal.' });
 });
+
+const HUB_API_URL = process.env.HUB_API_URL || 'http://localhost:29000';
+const HUB_APP_TOKEN = process.env.HUB_APP_TOKEN || 'starswarm_token_dev_999';
+
+async function unlockHubAchievement(email, achievementId) {
+  try {
+    const res = await fetch(`${HUB_API_URL}/api/games-api/achievements/unlock`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Token': HUB_APP_TOKEN
+      },
+      body: JSON.stringify({ email, achievementId })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      console.log(`Successfully unlocked achievement ${achievementId} for user ${email} in Hub.`);
+    } else {
+      console.error(`Hub achievement unlock returned error:`, data.error || data);
+    }
+  } catch (err) {
+    console.error(`Failed to connect to Hub achievements API:`, err.message);
+  }
+}
 
 // Endpoint: Record telemetry game statistics
 app.post('/api/stats', validateCSRF, (req, res) => {
@@ -759,6 +667,12 @@ app.post('/api/stats', validateCSRF, (req, res) => {
           if (selErr || !row) {
             return res.status(200).json({ success: true });
           }
+
+          // Trigger Hub achievement unlock asynchronously
+          if (won) {
+            unlockHubAchievement(user.email, 'starswarm_first_victory');
+          }
+
           res.status(200).json({
             success: true,
             stats: { gamesPlayed: row.games_played, gamesWon: row.games_won }

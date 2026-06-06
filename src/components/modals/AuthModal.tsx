@@ -66,7 +66,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ESTABLISHING COMMAND LINK
           </h2>
           <div style={{ margin: '20px 0', color: 'white', fontSize: '14px', fontFamily: 'Outfit', lineHeight: '1.6' }}>
-            Please complete Google authentication in your default web browser.
+            Please complete authentication in your default web browser.
           </div>
           <div style={{
             display: 'inline-block',
@@ -271,7 +271,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               onClick={() => {
                 let stateParam = window.location.search;
                 const playOnline = localStorage.getItem('starswarm_play_online') === 'true';
-                const serverUrl = localStorage.getItem('starswarm_server_url') || 'http://localhost:3001';
+                const serverUrl = localStorage.getItem('starswarm_server_url') || 'http://localhost:29002';
                 const isPackaged = isPackagedMode();
 
                 if (isPackaged) {

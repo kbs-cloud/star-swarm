@@ -1,6 +1,6 @@
 import { PlayerSetup } from './types';
 import React, { useState, useRef, useEffect } from 'react';
-import { isElectronMode, isPackagedMode } from './utils/env';
+import { isElectronMode, isPackagedMode, isCapacitorMode } from './utils/env';
 import {
   GameState,
   StarSystem,
@@ -72,7 +72,15 @@ import { ImportPreviewModal } from './components/modals/ImportPreviewModal';
 import { AboutModal } from './components/modals/AboutModal';
 
 type Screen = 'menu' | 'lobby' | 'game' | 'pass-turn' | 'game-over' | 'settings' | 'terms' | 'privacy';
-const StarNestBackground = ({ screen }: { screen: string }) => {
+const StarNestBackground = ({
+  screen,
+  staticBg,
+  onAutoDetectLowPerf
+}: {
+  screen: string;
+  staticBg: boolean;
+  onAutoDetectLowPerf: () => void;
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
 
@@ -203,6 +211,12 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
     const resLoc = gl.getUniformLocation(program, "iResolution");
 
     // --- Animation Loop ---
+    let lastTime = performance.now();
+    const frameTimes: number[] = [];
+    const maxFrameWindow = 60;
+    const startupDelayFrames = 120;
+    let frameCount = 0;
+
     const render = (time: number) => {
       // Handle resize using parent element dimensions so it fits height: calc(100vh - 50px)
       const parent = canvas.parentElement;
@@ -222,16 +236,43 @@ const StarNestBackground = ({ screen }: { screen: string }) => {
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-      requestRef.current = requestAnimationFrame(render);
+      if (!staticBg) {
+        const now = performance.now();
+        const delta = now - lastTime;
+        lastTime = now;
+
+        frameCount++;
+        if (frameCount > startupDelayFrames) {
+          frameTimes.push(delta);
+          if (frameTimes.length > maxFrameWindow) {
+            frameTimes.shift();
+            const avgFrameTime = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+            if (avgFrameTime > 45) {
+              onAutoDetectLowPerf();
+            }
+          }
+        }
+        requestRef.current = requestAnimationFrame(render);
+      }
     };
 
-    requestRef.current = requestAnimationFrame(render);
+    const handleResize = () => {
+      render(performance.now());
+    };
+
+    if (staticBg) {
+      render(performance.now());
+      window.addEventListener('resize', handleResize);
+    } else {
+      requestRef.current = requestAnimationFrame(render);
+    }
 
     // --- Cleanup ---
     return () => {
       cancelAnimationFrame(requestRef.current || 0);
+      window.removeEventListener('resize', handleResize);
     };
-  }, [screen]); // Re-run if screen changes
+  }, [screen, staticBg, onAutoDetectLowPerf]); // Re-run if screen or performance settings change
 
   const isVisible = ['menu', 'lobby', 'game-over', 'settings', 'terms', 'privacy'].includes(screen);
 
@@ -280,11 +321,38 @@ export default function App() {
     return localStorage.getItem('starswarm_sound_muted') === 'true';
   });
 
+  const [staticBg, setStaticBg] = useState<boolean>(() => {
+    return localStorage.getItem('starswarm_static_background') === 'true';
+  });
+  const sessionDisableAutoDetectRef = useRef<boolean>(false);
+
   const toggleSoundMuted = () => {
     setSoundMuted(prev => {
       const next = !prev;
       localStorage.setItem('starswarm_sound_muted', String(next));
       return next;
+    });
+  };
+
+  const toggleStaticBg = () => {
+    setStaticBg(prev => {
+      const next = !prev;
+      localStorage.setItem('starswarm_static_background', String(next));
+      sessionDisableAutoDetectRef.current = true;
+      showToast(next ? "Static background enabled." : "Animated background enabled.", "info");
+      return next;
+    });
+  };
+
+  const handleAutoDetectLowPerf = () => {
+    if (sessionDisableAutoDetectRef.current) return;
+    setStaticBg(prev => {
+      if (!prev) {
+        localStorage.setItem('starswarm_static_background', 'true');
+        showToast("Low performance detected. Switched to static background.", "warning");
+        return true;
+      }
+      return prev;
     });
   };
 
@@ -481,7 +549,7 @@ export default function App() {
   const [activeMobileTab, setActiveMobileTab] = useState<'map' | 'empire' | 'tactics'>('map');
 
   const [playOnline, setPlayOnline] = useState<boolean>(() => localStorage.getItem('starswarm_play_online') === 'true');
-  const [serverUrl, setServerUrl] = useState<string>(() => localStorage.getItem('starswarm_server_url') || 'http://localhost:3001');
+  const [serverUrl, setServerUrl] = useState<string>(() => localStorage.getItem('starswarm_server_url') || 'http://localhost:29002');
 
   const [settingsPlayOnline, setSettingsPlayOnline] = useState<boolean>(playOnline);
   const [settingsServerUrl, setSettingsServerUrl] = useState<string>(serverUrl);
@@ -1823,11 +1891,27 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    logoutUser();
+  const handleLogout = async () => {
+    const isPackaged = isPackagedMode();
+    await logoutUser();
     setCurrentUser(null);
     setSavedGames([]);
     clearUrlQuery();
+
+    if (!isPackaged) {
+      const authProto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const getAuthServerUrl = () => {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          const port = window.location.port;
+          if (port === '28002' || port === '29002') {
+            return 'http://localhost:28001';
+          }
+          return 'http://localhost:19001';
+        }
+        return `${authProto}//auth.kbs-cloud.com`;
+      };
+      window.location.href = `${getAuthServerUrl()}/api/auth/logout?redirect_uri=${encodeURIComponent(window.location.origin)}`;
+    }
   };
 
   const clearAuthInputs = () => {
@@ -2166,7 +2250,11 @@ export default function App() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <div className="space-bg" />
-      <StarNestBackground screen={screen} />
+      <StarNestBackground
+        screen={screen}
+        staticBg={staticBg}
+        onAutoDetectLowPerf={handleAutoDetectLowPerf}
+      />
       {/* ERROR HUD ALERTS */}
       <AlertHud message={alertMsg} />
 
@@ -2188,9 +2276,46 @@ export default function App() {
           currentUser={currentUser}
           soundMuted={soundMuted}
           onToggleSoundMuted={toggleSoundMuted}
+          staticBg={staticBg}
+          onToggleStaticBg={toggleStaticBg}
           onOpenAuth={() => {
-            clearAuthInputs();
-            setIsAuthModalOpen(true);
+            const isPackaged = isPackagedMode();
+            const playOnline = localStorage.getItem('starswarm_play_online') === 'true';
+            const serverUrl = localStorage.getItem('starswarm_server_url') || 'http://localhost:29002';
+            
+            // Redirect URI should be the callback endpoint on the game's backend server
+            const localBackendBase = (isPackaged && playOnline) ? serverUrl.replace(/\/$/, '') : window.location.origin;
+            const redirectUri = `${localBackendBase}/api/auth/callback`;
+            
+            const authProto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+            const getAuthServerUrl = () => {
+              if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                const port = window.location.port;
+                if (port === '28002' || port === '29002') {
+                  return 'http://localhost:28001';
+                }
+                return 'http://localhost:19001';
+              }
+              return `${authProto}//auth.kbs-cloud.com`;
+            };
+            let targetUrl = `${getAuthServerUrl()}/api/auth/authorize?client_id=starswarm&redirect_uri=${encodeURIComponent(redirectUri)}`;
+            
+            if (isPackaged) {
+              const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+              localStorage.setItem('starswarm_auth_pending_token', token);
+              
+              const stateParam = `source=electron&token=${token}`;
+              targetUrl += `&state=${encodeURIComponent(stateParam)}`;
+              
+              if (isCapacitorMode()) {
+                window.open(targetUrl, '_system');
+              } else {
+                window.open(targetUrl, '_blank');
+              }
+              setIsAuthModalOpen(true); // Shows full-screen loader checking for polling completion
+            } else {
+              window.location.href = targetUrl;
+            }
           }}
           onLogout={handleLogout}
           onNavigateSettings={() => setScreen('settings')}
@@ -2347,6 +2472,8 @@ export default function App() {
           onAssignPlayerEmail={handleAssignPlayerEmail}
           soundMuted={soundMuted}
           onToggleSoundMuted={toggleSoundMuted}
+          staticBg={staticBg}
+          onToggleStaticBg={toggleStaticBg}
           homePendingRequests={homePendingRequests}
           setHomePendingRequests={setHomePendingRequests}
           joinPanelGameId={joinPanelGameId}

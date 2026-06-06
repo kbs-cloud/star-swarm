@@ -1,7 +1,7 @@
 import { isPackagedMode } from '../../utils/env';
 
 export function getServerUrl(): string {
-  return localStorage.getItem('starswarm_server_url') || 'http://localhost:3001';
+  return localStorage.getItem('starswarm_server_url') || 'http://localhost:29002';
 }
 
 export function isOnlineMode(): boolean {

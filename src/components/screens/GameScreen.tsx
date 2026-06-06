@@ -40,6 +40,8 @@ interface GameScreenProps {
   onAssignPlayerEmail: (playerId: number, email: string) => void;
   soundMuted: boolean;
   onToggleSoundMuted: () => void;
+  staticBg: boolean;
+  onToggleStaticBg: () => void;
   homePendingRequests: { [gameId: string]: JoinRequest[] };
   setHomePendingRequests: React.Dispatch<React.SetStateAction<{ [gameId: string]: JoinRequest[] }>>;
   joinPanelGameId: string | null;
@@ -93,6 +95,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   onAssignPlayerEmail,
   soundMuted,
   onToggleSoundMuted,
+  staticBg,
+  onToggleStaticBg,
   homePendingRequests,
   setHomePendingRequests,
   joinPanelGameId,
@@ -170,6 +174,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
             onAssignPlayerEmail={onAssignPlayerEmail}
             soundMuted={soundMuted}
             onToggleSoundMuted={onToggleSoundMuted}
+            staticBg={staticBg}
+            onToggleStaticBg={onToggleStaticBg}
             compactMode={compactMode}
             isMobile={isMobile}
             activeMobileTab={activeMobileTab}

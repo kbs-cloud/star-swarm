@@ -222,7 +222,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   type="text"
                   value={settingsServerUrl}
                   onChange={(e) => setSettingsServerUrl(e.target.value)}
-                  placeholder="http://localhost:3001"
+                  placeholder="http://localhost:29002"
                   style={{
                     background: 'rgba(0,0,0,0.5)',
                     border: '1px solid rgba(255,255,255,0.1)',
