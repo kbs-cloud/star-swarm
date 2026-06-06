@@ -70,7 +70,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
         }}>•</span>
 
         <a
-          href="https://github.com/malkamius/star-swarm/"
+          href="https://github.com/kbs-cloud/star-swarm"
           target="_blank"
           rel="noopener noreferrer"
           title="Star-Swarm on GitHub"

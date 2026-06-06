@@ -124,7 +124,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
           <Section title="11. CONTACT">
             For questions about these Terms, please open an issue on our{' '}
             <a
-              href="https://github.com/malkamius/star-swarm/"
+              href="https://github.com/kbs-cloud/star-swarm"
               target="_blank"
               rel="noopener noreferrer"
               style={{ color: 'var(--accent-cyan)', textDecoration: 'underline' }}

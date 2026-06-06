@@ -186,7 +186,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
           <Section title="12. CONTACT">
             For privacy-related inquiries, please open an issue on our{' '}
             <a
-              href="https://github.com/malkamius/star-swarm/"
+              href="https://github.com/kbs-cloud/star-swarm"
               target="_blank"
               rel="noopener noreferrer"
               style={{ color: 'var(--accent-cyan)', textDecoration: 'underline' }}
