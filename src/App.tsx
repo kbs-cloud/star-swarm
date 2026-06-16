@@ -859,6 +859,9 @@ export default function App() {
 
   // Helper: Return to menu safely, clearing active game query
   const handleReturnToMenu = () => {
+    if (screen === 'game' && !confirm("Leave the current game session and return to the main menu?")) {
+      return;
+    }
     clearUrlQuery();
     setGameState(null);
     setScreen('menu');
@@ -2365,6 +2368,7 @@ export default function App() {
           onLogout={handleLogout}
           onNavigateSettings={() => setScreen('settings')}
           compactMode={compactMode || isMobile}
+          showHubButton={screen === 'menu'}
         />
       )}
 

@@ -2,6 +2,15 @@ import React, { useState, useRef, useEffect } from 'react';
 import { UserAccount } from '../../game/auth';
 import { isPackagedMode } from '../../utils/env';
 
+function getHubUrl(): string {
+  if (typeof window === 'undefined') return 'http://localhost:19000';
+  const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://localhost:19000';
+  }
+  return `${proto}//kbs-cloud.com`;
+}
+
 interface AuthBarProps {
   currentUser: UserAccount | null;
   soundMuted: boolean;
@@ -12,6 +21,7 @@ interface AuthBarProps {
   onLogout: () => void;
   onNavigateSettings: () => void;
   compactMode?: boolean;
+  showHubButton?: boolean;
 }
 
 export const AuthBar: React.FC<AuthBarProps> = ({
@@ -23,7 +33,8 @@ export const AuthBar: React.FC<AuthBarProps> = ({
   onOpenAuth,
   onLogout,
   onNavigateSettings,
-  compactMode = false
+  compactMode = false,
+  showHubButton = false
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -190,6 +201,31 @@ export const AuthBar: React.FC<AuthBarProps> = ({
 
           {/* Actions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+            {showHubButton && (
+              <a
+                href={getHubUrl()}
+                className="btn-sci-fi"
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '11px',
+                  justifyContent: 'flex-start',
+                  width: '100%',
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="9"></rect>
+                  <rect x="14" y="3" width="7" height="5"></rect>
+                  <rect x="14" y="12" width="7" height="9"></rect>
+                  <rect x="3" y="16" width="7" height="5"></rect>
+                </svg>
+                <span>HUB CATALOG</span>
+              </a>
+            )}
             {/* MUTE TOGGLE */}
             <button
               className="btn-sci-fi"
@@ -334,6 +370,28 @@ export const AuthBar: React.FC<AuthBarProps> = ({
       borderRadius: '8px',
       padding: '8px 16px'
     }}>
+      {showHubButton && (
+        <a
+          href={getHubUrl()}
+          className="btn-sci-fi"
+          style={{
+            padding: '8px 16px',
+            fontSize: '12px',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="9"></rect>
+            <rect x="14" y="3" width="7" height="5"></rect>
+            <rect x="14" y="12" width="7" height="9"></rect>
+            <rect x="3" y="16" width="7" height="5"></rect>
+          </svg>
+          HUB CATALOG
+        </a>
+      )}
       {/* MUTE TOGGLE */}
       <button
         className="btn-sci-fi"
