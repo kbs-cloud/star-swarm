@@ -889,6 +889,7 @@ export const StarMap: React.FC<StarMapProps> = ({
             left: `${contextMenu.x}px`,
             background: 'rgba(6, 4, 18, 0.95)',
             backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
             border: '1px solid var(--accent-cyan)',
             boxShadow: '0 0 20px rgba(0, 240, 255, 0.25)',
             borderRadius: '6px',

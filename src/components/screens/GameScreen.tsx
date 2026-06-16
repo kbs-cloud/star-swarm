@@ -338,6 +338,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           height: '100%',
           backgroundColor: 'rgba(5, 3, 13, 0.45)',
           backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',

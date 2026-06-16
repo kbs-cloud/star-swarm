@@ -10,6 +10,7 @@ NEXT_COMMIT.txt
 NEXT_CHANGELOG.md
 
 node_modules
+.vite
 dist
 dist-ssr
 *.local
@@ -28,6 +29,7 @@ dist-ssr
 # Database
 *.db
 *.db.bak
+*.db-*
 
 # Playwright
 playwright-report/

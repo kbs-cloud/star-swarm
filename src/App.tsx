@@ -2441,6 +2441,7 @@ export default function App() {
           handleReturnToMenu={handleReturnToMenu}
           currentUser={currentUser}
           playOnline={playOnline}
+          isMobile={isMobile}
         />
       )}
 

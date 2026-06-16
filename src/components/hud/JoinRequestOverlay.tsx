@@ -30,9 +30,10 @@ export const JoinRequestOverlay: React.FC<JoinRequestOverlayProps> = ({
   return (
     <div style={{
       position: 'fixed',
-      top: 0, left: 0, width: '100vw', height: '100vh',
+      top: 0, left: 0, width: '100vw', height: '100dvh',
       background: 'rgba(5, 10, 20, 0.93)',
       backdropFilter: 'blur(14px)',
+      WebkitBackdropFilter: 'blur(14px)',
       zIndex: 9000,
       display: 'flex',
       flexDirection: 'column',

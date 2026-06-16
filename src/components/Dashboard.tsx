@@ -1805,6 +1805,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           height: '100%',
           background: 'rgba(5, 10, 20, 0.92)',
           backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
           zIndex: 9999,
           display: 'flex',
           flexDirection: 'column',

@@ -56,6 +56,7 @@ export const NotificationsStack: React.FC<NotificationsStackProps> = ({
             style={{
               background: bgGradient,
               backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
               border: `1px solid ${borderColor}`,
               boxShadow: `0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 0 15px ${glowColor}`,
               borderRadius: '8px',

@@ -36,6 +36,7 @@ interface LobbyScreenProps {
   handleReturnToMenu: () => void;
   currentUser: { email: string } | null;
   playOnline?: boolean;
+  isMobile?: boolean;
 }
 
 export const LobbyScreen: React.FC<LobbyScreenProps> = ({
@@ -70,11 +71,12 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   handleStartGame,
   handleReturnToMenu,
   currentUser,
-  playOnline = false
+  playOnline = false,
+  isMobile = false
 }) => {
   return (
     <div style={{
-      height: 'calc(100vh - 40px)',
+      height: 'calc(100dvh - 40px)',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
@@ -359,7 +361,15 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
               const factionColor = player.color || FACTION_INFO[player.id]?.color || '#ffffff';
               const isOfflineElectron = isPackagedMode() && !playOnline;
               return (
-                <div key={player.id} style={{
+                 <div key={player.id} style={isMobile ? {
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  background: 'rgba(255,255,255,0.02)',
+                  padding: '10px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255,255,255,0.05)'
+                } : {
                   display: 'grid',
                   gridTemplateColumns: isOfflineElectron ? '24px 1.5fr 1fr 1fr 1.2fr 32px' : '24px 1.5fr 1fr 1fr 90px 2fr 32px',
                   gap: '8px',
@@ -369,120 +379,190 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   borderRadius: '6px',
                   border: '1px solid rgba(255,255,255,0.05)'
                 }}>
-                  {/* Color indicator */}
-                  <div style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '50%',
-                    background: factionColor,
-                    boxShadow: `0 0 8px ${factionColor}`,
-                    justifySelf: 'center'
-                  }} />
+                  {/* Group A: Color, Name, Delete button on mobile */}
+                  <div style={isMobile ? { display: 'flex', alignItems: 'center', gap: '8px', width: '100%' } : { display: 'contents' }}>
+                    {/* Color indicator */}
+                    <div style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      background: factionColor,
+                      boxShadow: `0 0 8px ${factionColor}`,
+                      justifySelf: 'center',
+                      flexShrink: 0
+                    }} />
+                    
+                    {/* Name input */}
+                    <input
+                      type="text"
+                      value={player.name}
+                      onChange={(e) => updatePlayerSetup(idx, 'name', e.target.value)}
+                      style={{
+                        background: 'rgba(0,0,0,0.5)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'white',
+                        padding: '6px 10px',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        flex: 1,
+                        minWidth: 0
+                      }}
+                    />
+
+                    {isMobile && idx > 0 && playersSetup.length > 2 && (
+                      <button
+                        className="btn-sci-fi btn-danger"
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: '12px',
+                          justifyContent: 'center',
+                          flexShrink: 0
+                        }}
+                        onClick={() => handleRemovePlayer(player.id)}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                   
-                  {/* Name input */}
-                  <input
-                    type="text"
-                    value={player.name}
-                    onChange={(e) => updatePlayerSetup(idx, 'name', e.target.value)}
-                    style={{
-                      background: 'rgba(0,0,0,0.5)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      color: 'white',
-                      padding: '6px 10px',
-                      borderRadius: '4px',
-                      fontSize: '13px'
-                    }}
-                  />
-                  
-                  {/* Controller selector */}
-                  <select
-                    value={player.type}
-                    onChange={(e) => {
-                      const val = e.target.value as 'human' | 'ai';
-                      setPlayersSetup(prev => {
-                        const copy = [...prev];
-                        copy[idx] = {
-                          ...copy[idx],
-                          type: val,
-                          isLocal: val === 'human',
-                          assignedEmail: val === 'human' ? '' : null,
-                          difficulty: val === 'ai' ? 'medium' : undefined,
-                          aiConfig: val === 'ai' ? { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } : undefined
-                        };
-                        return copy;
-                      });
-                    }}
-                    style={{
-                      background: 'rgba(0,0,0,0.8)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      color: 'white',
-                      padding: '6px 10px',
-                      borderRadius: '4px',
-                      fontSize: '13px'
-                    }}
-                    disabled={idx === 0}
-                  >
-                    <option value="human">🌐 HUMAN</option>
-                    <option value="ai">🤖 AI</option>
-                  </select>
- 
-                  {/* Team Selector */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* Group B: Controller and Team Selectors */}
+                  <div style={isMobile ? { display: 'flex', gap: '8px', width: '100%' } : { display: 'contents' }}>
+                    {/* Controller selector */}
                     <select
-                      value={player.team}
-                      onChange={(e) => updatePlayerSetup(idx, 'team', parseInt(e.target.value))}
+                      value={player.type}
+                      onChange={(e) => {
+                        const val = e.target.value as 'human' | 'ai';
+                        setPlayersSetup(prev => {
+                          const copy = [...prev];
+                          copy[idx] = {
+                            ...copy[idx],
+                            type: val,
+                            isLocal: val === 'human',
+                            assignedEmail: val === 'human' ? '' : null,
+                            difficulty: val === 'ai' ? 'medium' : undefined,
+                            aiConfig: val === 'ai' ? { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 } : undefined
+                          };
+                          return copy;
+                        });
+                      }}
                       style={{
                         background: 'rgba(0,0,0,0.8)',
                         border: '1px solid rgba(255,255,255,0.1)',
                         color: 'white',
-                        padding: '6px 8px',
+                        padding: '6px 10px',
                         borderRadius: '4px',
-                        fontSize: '12px',
-                        width: '100%'
+                        fontSize: '13px',
+                        flex: isMobile ? 1 : undefined
                       }}
+                      disabled={idx === 0}
                     >
-                      <option value={1}>Team 1</option>
-                      <option value={2}>Team 2</option>
-                      <option value={3}>Team 3</option>
-                      <option value={4}>Team 4</option>
+                      <option value="human">🌐 HUMAN</option>
+                      <option value="ai">🤖 AI</option>
                     </select>
+   
+                    {/* Team Selector */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: isMobile ? 1 : undefined }}>
+                      <select
+                        value={player.team}
+                        onChange={(e) => updatePlayerSetup(idx, 'team', parseInt(e.target.value))}
+                        style={{
+                          background: 'rgba(0,0,0,0.8)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          color: 'white',
+                          padding: '6px 8px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          width: '100%'
+                        }}
+                      >
+                        <option value={1}>Team 1</option>
+                        <option value={2}>Team 2</option>
+                        <option value={3}>Team 3</option>
+                        <option value={4}>Team 4</option>
+                      </select>
+                    </div>
                   </div>
 
-                  {/* Local Playable & Assigned Email OR AI Difficulty Selector */}
-                  {!isOfflineElectron ? (
-                    player.type === 'human' ? (
-                      <>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  {/* Group C: Local Playable & Assigned Email OR AI Difficulty Selector */}
+                  <div style={isMobile ? { display: 'flex', gap: '8px', alignItems: 'center', width: '100%', flexWrap: 'wrap' } : { display: 'contents' }}>
+                    {!isOfflineElectron ? (
+                      player.type === 'human' ? (
+                        <>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!player.isLocal}
+                              disabled={idx === 0}
+                              onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
+                              style={{ accentColor: 'var(--accent-cyan)' }}
+                            />
+                            <span>LOCAL</span>
+                          </label>
                           <input
-                            type="checkbox"
-                            checked={!!player.isLocal}
+                            type="text"
+                            placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
+                            value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
                             disabled={idx === 0}
-                            onChange={(e) => updatePlayerSetup(idx, 'isLocal', e.target.checked)}
-                            style={{ accentColor: 'var(--accent-cyan)' }}
+                            onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
+                            style={{
+                              background: 'rgba(0,0,0,0.5)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              color: 'white',
+                              padding: '6px 8px',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              width: isMobile ? 'auto' : '100%',
+                              flex: isMobile ? 1 : undefined,
+                              boxSizing: 'border-box'
+                            }}
                           />
-                          <span>LOCAL</span>
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={idx === 0 ? (currentUser?.email || 'Owner') : 'Remote commander email'}
-                          value={idx === 0 ? (currentUser?.email || '') : (player.assignedEmail || '')}
-                          disabled={idx === 0}
-                          onChange={(e) => updatePlayerSetup(idx, 'assignedEmail', e.target.value)}
-                          style={{
-                            background: 'rgba(0,0,0,0.5)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            color: 'white',
-                            padding: '6px 8px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            width: '100%',
-                            boxSizing: 'border-box'
-                          }}
-                        />
-                      </>
+                        </>
+                      ) : (
+                        <div style={{ gridColumn: isMobile ? undefined : 'span 2', display: 'flex', gap: '8px', alignItems: 'center', flex: isMobile ? 1 : undefined, width: isMobile ? '100%' : undefined }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>DIFFICULTY:</span>
+                          <select
+                            value={player.difficulty || 'medium'}
+                            onChange={(e) => {
+                              const diffVal = e.target.value;
+                              setPlayersSetup(prev => {
+                                const copy = [...prev];
+                                const playerCopy = { ...copy[idx] };
+                                playerCopy.difficulty = diffVal as any;
+                                
+                                if (diffVal === 'easy') {
+                                  playerCopy.aiConfig = { aggression: 20, expansion: 20, techFocus: 15, economyBonus: 0 };
+                                } else if (diffVal === 'hard') {
+                                  playerCopy.aiConfig = { aggression: 90, expansion: 90, techFocus: 90, economyBonus: 15 };
+                                } else if (diffVal === 'medium') {
+                                  playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
+                                } else if (diffVal === 'custom' && !playerCopy.aiConfig) {
+                                  playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
+                                }
+                                copy[idx] = playerCopy;
+                                return copy;
+                              });
+                            }}
+                            style={{
+                              background: 'rgba(0,0,0,0.8)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              color: 'white',
+                              padding: '6px 10px',
+                              borderRadius: '4px',
+                              fontSize: '13px',
+                              flex: 1
+                            }}
+                          >
+                            <option value="easy">🟢 Novice AI</option>
+                            <option value="medium">🟡 Standard AI</option>
+                            <option value="hard">🔴 Brutal AI</option>
+                            <option value="custom">⚙️ Custom Setup</option>
+                          </select>
+                        </div>
+                      )
                     ) : (
-                      <div style={{ gridColumn: 'span 2', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>DIFFICULTY:</span>
+                      player.type === 'human' ? (
+                        !isMobile ? <div /> : null
+                      ) : (
                         <select
                           value={player.difficulty || 'medium'}
                           onChange={(e) => {
@@ -512,7 +592,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                             padding: '6px 10px',
                             borderRadius: '4px',
                             fontSize: '13px',
-                            flex: 1
+                            width: '100%'
                           }}
                         >
                           <option value="easy">🟢 Novice AI</option>
@@ -520,52 +600,10 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                           <option value="hard">🔴 Brutal AI</option>
                           <option value="custom">⚙️ Custom Setup</option>
                         </select>
-                      </div>
-                    )
-                  ) : (
-                    player.type === 'human' ? (
-                      <div />
-                    ) : (
-                      <select
-                        value={player.difficulty || 'medium'}
-                        onChange={(e) => {
-                          const diffVal = e.target.value;
-                          setPlayersSetup(prev => {
-                            const copy = [...prev];
-                            const playerCopy = { ...copy[idx] };
-                            playerCopy.difficulty = diffVal as any;
-                            
-                            if (diffVal === 'easy') {
-                              playerCopy.aiConfig = { aggression: 20, expansion: 20, techFocus: 15, economyBonus: 0 };
-                            } else if (diffVal === 'hard') {
-                              playerCopy.aiConfig = { aggression: 90, expansion: 90, techFocus: 90, economyBonus: 15 };
-                            } else if (diffVal === 'medium') {
-                              playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
-                            } else if (diffVal === 'custom' && !playerCopy.aiConfig) {
-                              playerCopy.aiConfig = { aggression: 50, expansion: 50, techFocus: 50, economyBonus: 0 };
-                            }
-                            copy[idx] = playerCopy;
-                            return copy;
-                          });
-                        }}
-                        style={{
-                          background: 'rgba(0,0,0,0.8)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          color: 'white',
-                          padding: '6px 10px',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          width: '100%'
-                        }}
-                      >
-                        <option value="easy">🟢 Novice AI</option>
-                        <option value="medium">🟡 Standard AI</option>
-                        <option value="hard">🔴 Brutal AI</option>
-                        <option value="custom">⚙️ Custom Setup</option>
-                      </select>
-                    )
-                  )}
- 
+                      )
+                    )}
+                  </div>
+
                   {/* Custom AI Config Sliders Panel */}
                   {player.type === 'ai' && player.difficulty === 'custom' && (
                     <div style={{
@@ -595,7 +633,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
                       <div style={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
+                        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
                         gap: '12px 20px',
                         fontSize: '12px'
                       }}>
@@ -714,21 +752,23 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                     </div>
                   )}
 
-                  {/* Remove Button */}
-                  {idx > 0 && playersSetup.length > 2 ? (
-                    <button
-                      className="btn-sci-fi btn-danger"
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '11px',
-                        justifyContent: 'center'
-                      }}
-                      onClick={() => handleRemovePlayer(player.id)}
-                    >
-                      ✕
-                    </button>
-                  ) : (
-                    <div />
+                  {/* Remove Button on desktop */}
+                  {!isMobile && (
+                    idx > 0 && playersSetup.length > 2 ? (
+                      <button
+                        className="btn-sci-fi btn-danger"
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          justifyContent: 'center'
+                        }}
+                        onClick={() => handleRemovePlayer(player.id)}
+                      >
+                        ✕
+                      </button>
+                    ) : (
+                      <div />
+                    )
                   )}
                 </div>
               );

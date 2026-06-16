@@ -633,7 +633,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
 
   return (
     <div style={compactMode ? {
-      height: 'calc(100vh - 40px)',
+      height: 'calc(100dvh - 40px)',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'flex-start',
@@ -646,7 +646,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       boxSizing: 'border-box',
       overflow: 'hidden'
     } : {
-      height: 'calc(100vh - 40px)',
+      height: 'calc(100dvh - 40px)',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'flex-start',
