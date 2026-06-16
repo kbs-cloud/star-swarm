@@ -14,6 +14,9 @@ try {
 }
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    preserveSymlinks: true
+  },
   base: './',
   cacheDir: 'node_modules/.vite_cache',
   server: {

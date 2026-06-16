@@ -1,6 +1,7 @@
 import { PlayerSetup } from './types';
 import React, { useState, useRef, useEffect } from 'react';
 import { isPackagedMode, isCapacitorMode } from './utils/env';
+import { startSSOBackgroundCheck, redirectToSSO } from './shared/auth/sso-helper';
 import {
   GameState,
   StarSystem,
@@ -1099,6 +1100,28 @@ export default function App() {
     bootstrap();
   }, []);
 
+  // Silent SSO Background check
+  React.useEffect(() => {
+    if (currentUser) return;
+    const isOnline = !isPackagedMode() || playOnline;
+    if (!isOnline) return;
+
+    const cleanup = startSSOBackgroundCheck({
+      clientId: 'starswarm',
+      onSuccess: async () => {
+        const user = await checkSession();
+        if (user) {
+          setCurrentUser(user);
+          showToast(`Connected as ${user.displayName || user.email}`, 'success');
+        }
+      }
+    });
+
+    return () => {
+      cleanup();
+    };
+  }, [playOnline, currentUser]);
+
   // Poll for Google Sign-in completion in Electron
   React.useEffect(() => {
     if (!isPackagedMode()) return;
@@ -1869,6 +1892,18 @@ export default function App() {
     }
   };
 
+  const handleSSOLogin = () => {
+    const isPackaged = isPackagedMode();
+    if (isPackaged) {
+      const token = Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('starswarm_auth_pending_token', token);
+      redirectToSSO('starswarm', `source=electron&token=${token}`);
+      setIsGooglePolling(true);
+    } else {
+      redirectToSSO('starswarm');
+    }
+  };
+
   const handleCancelGooglePoll = () => {
     localStorage.removeItem('starswarm_auth_pending_token');
     setIsGooglePolling(false);
@@ -2613,20 +2648,13 @@ export default function App() {
       {/* AUTH MODAL */}
       <AuthModal
         isOpen={isAuthModalOpen}
-        authTab={authTab}
-        authEmail={authEmail}
-        authPassword={authPassword}
+        onClose={() => setIsAuthModalOpen(false)}
         authError={authError}
-        authSuccess={authSuccess}
-        isGoogleAuthEnabled={isGoogleAuthEnabled}
         isGooglePolling={isGooglePolling}
         onCancelGooglePoll={handleCancelGooglePoll}
-        onClose={() => setIsAuthModalOpen(false)}
-        onSetTab={setAuthTab}
-        onSetEmail={setAuthEmail}
-        onSetPassword={setAuthPassword}
-        onLogin={handleLogin}
-        onRegister={handleRegister}
+        playOnline={playOnline}
+        onPlayOnlineChange={handleToggleOnline}
+        onLoginClick={handleSSOLogin}
       />
 
       {/* DELETE GAME MODAL */}

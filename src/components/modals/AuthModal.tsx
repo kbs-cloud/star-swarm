@@ -1,103 +1,28 @@
 import React from 'react';
-import { isPackagedMode, isCapacitorMode } from '../../utils/env';
-
+import { SSOLoginPanel } from '../../shared/auth/SSOLoginPanel';
 
 interface AuthModalProps {
   isOpen: boolean;
-  authTab: 'signin' | 'register';
-  authEmail: string;
-  authPassword: string;
+  onClose: () => void;
   authError: string | null;
-  authSuccess: string | null;
-  isGoogleAuthEnabled: boolean;
   isGooglePolling?: boolean;
   onCancelGooglePoll?: () => void;
-  onClose: () => void;
-  onSetTab: (tab: 'signin' | 'register') => void;
-  onSetEmail: (v: string) => void;
-  onSetPassword: (v: string) => void;
-  onLogin: (e: React.FormEvent) => void;
-  onRegister: (e: React.FormEvent) => void;
+  playOnline: boolean;
+  onPlayOnlineChange: (playOnline: boolean) => void;
+  onLoginClick: () => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
-  authTab,
-  authEmail,
-  authPassword,
-  authError,
-  authSuccess,
-  isGoogleAuthEnabled,
-  isGooglePolling = false,
-  onCancelGooglePoll,
   onClose,
-  onSetTab,
-  onSetEmail,
-  onSetPassword,
-  onLogin,
-  onRegister
+  authError,
+  isGooglePolling = false,
+  onCancelGooglePoll = () => {},
+  playOnline,
+  onPlayOnlineChange,
+  onLoginClick
 }) => {
   if (!isOpen) return null;
-
-  if (isGooglePolling) {
-    return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100vw',
-        height: '100dvh',
-        background: 'rgba(5, 3, 13, 0.85)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 1000
-      }}>
-        <div style={{
-          width: '420px',
-          padding: '30px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '20px',
-          textAlign: 'center'
-        }} className="glass-panel glass-panel-neon-cyan">
-          <h2 style={{ fontSize: '18px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
-            ESTABLISHING COMMAND LINK
-          </h2>
-          <div style={{ margin: '20px 0', color: 'white', fontSize: '14px', fontFamily: 'Outfit', lineHeight: '1.6' }}>
-            Please complete authentication in your default web browser.
-          </div>
-          <div style={{
-            display: 'inline-block',
-            margin: '10px auto',
-            width: '30px',
-            height: '30px',
-            border: '3px solid rgba(0, 255, 255, 0.2)',
-            borderTopColor: 'var(--accent-cyan)',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }} />
-          <style>{`
-            @keyframes spin {
-              to { transform: rotate(360deg); }
-            }
-          `}</style>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>
-            [WAITING FOR BROWSER VALIDATION...]
-          </div>
-          <button
-            className="btn-sci-fi btn-danger"
-            style={{ width: '100%', marginTop: '15px', justifyContent: 'center' }}
-            onClick={onCancelGooglePoll}
-          >
-            CANCEL CONNECTION REQUEST
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{
@@ -114,199 +39,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       alignItems: 'center',
       zIndex: 1000
     }}>
-      <div style={{
-        width: '420px',
-        padding: '30px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px'
-      }} className="glass-panel glass-panel-neon-cyan">
+      <button
+        onClick={onClose}
+        style={{
+          position: 'absolute',
+          top: '20px',
+          right: '20px',
+          background: 'rgba(0, 255, 255, 0.1)',
+          border: '1px solid rgba(0, 255, 255, 0.4)',
+          color: '#00f0ff',
+          padding: '8px 12px',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          zIndex: 1010,
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: '12px',
+          letterSpacing: '1px'
+        }}
+      >
+        ✕ CLOSE
+      </button>
 
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ fontSize: '18px', color: 'var(--accent-cyan)', fontFamily: 'Orbitron', letterSpacing: '1px' }}>
-            {authTab === 'signin' ? 'ESTABLISH COMMAND LINK' : 'CREATE COMMAND PROTOCOL'}
-          </h2>
-          <button
-            className="btn-sci-fi btn-danger"
-            style={{ padding: '4px 8px', fontSize: '10px' }}
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-          <button
-            style={{
-              flex: 1,
-              background: 'none',
-              border: 'none',
-              borderBottom: authTab === 'signin' ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-              color: authTab === 'signin' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-              padding: '10px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              fontFamily: 'Outfit'
-            }}
-            onClick={() => { onSetTab('signin'); }}
-          >
-            SIGN IN
-          </button>
-          <button
-            style={{
-              flex: 1,
-              background: 'none',
-              border: 'none',
-              borderBottom: authTab === 'register' ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-              color: authTab === 'register' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-              padding: '10px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              fontFamily: 'Outfit'
-            }}
-            onClick={() => { onSetTab('register'); }}
-          >
-            REGISTER
-          </button>
-        </div>
-
-        {/* Notification messages */}
-        {authError && (
-          <div style={{
-            background: 'rgba(255, 0, 127, 0.1)',
-            border: '1px solid var(--accent-magenta)',
-            padding: '10px',
-            borderRadius: '6px',
-            color: 'var(--accent-magenta)',
-            fontSize: '12px',
-            fontWeight: 'bold',
-            fontFamily: 'Share Tech Mono'
-          }}>
-            [ERROR] {authError}
-          </div>
-        )}
-        {authSuccess && (
-          <div style={{
-            background: 'rgba(57, 255, 20, 0.1)',
-            border: '1px solid var(--accent-green)',
-            padding: '10px',
-            borderRadius: '6px',
-            color: 'var(--accent-green)',
-            fontSize: '12px',
-            fontWeight: 'bold',
-            fontFamily: 'Share Tech Mono'
-          }}>
-            [SUCCESS] {authSuccess}
-          </div>
-        )}
-
-        {/* Auth Form */}
-        <form onSubmit={authTab === 'signin' ? onLogin : onRegister} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          <div>
-            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>COMMANDER EMAIL</label>
-            <input
-              type="email"
-              value={authEmail}
-              onChange={(e) => onSetEmail(e.target.value)}
-              style={{
-                width: '100%',
-                background: 'rgba(0,0,0,0.5)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'white',
-                padding: '10px',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontFamily: 'Outfit'
-              }}
-              placeholder="name@domain.com"
-              required
-            />
-          </div>
-
-          <div>
-            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>ACCESS PASSWORD (MIN 8 CHARS)</label>
-            <input
-              type="password"
-              value={authPassword}
-              onChange={(e) => onSetPassword(e.target.value)}
-              style={{
-                width: '100%',
-                background: 'rgba(0,0,0,0.5)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'white',
-                padding: '10px',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontFamily: 'Outfit'
-              }}
-              placeholder="••••••••"
-              required
-            />
-          </div>
-
-          <button className="btn-sci-fi" type="submit" style={{ justifyContent: 'center', marginTop: '5px' }}>
-            {authTab === 'signin' ? 'INITIATE CONNECTION' : 'CREATE PROTOCOL'}
-          </button>
-        </form>
-
-        {isGoogleAuthEnabled && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '5px 0' }}>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono' }}>OR</span>
-              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-            </div>
-
-            <button
-              className="btn-sci-fi"
-              type="button"
-              style={{
-                justifyContent: 'center',
-                background: 'rgba(255, 255, 255, 0.05)',
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                width: '100%',
-                marginTop: '5px'
-              }}
-              onClick={() => {
-                let stateParam = window.location.search;
-                const playOnline = localStorage.getItem('starswarm_play_online') === 'true';
-                const serverUrl = localStorage.getItem('starswarm_server_url') || 'http://localhost:29002';
-                const isPackaged = isPackagedMode();
-
-                if (isPackaged) {
-                  const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-                  localStorage.setItem('starswarm_auth_pending_token', token);
-
-                  const params = new URLSearchParams(stateParam);
-                  params.set('source', 'electron'); // Tell the server to render the polling HTML page
-                  params.set('token', token);
-                  stateParam = '?' + params.toString();
-                }
-
-                const base = (isPackaged && playOnline) ? serverUrl.replace(/\/$/, '') : '';
-                const targetUrl = `${base}/api/auth/google?state=${encodeURIComponent(stateParam)}`;
-
-                if (isCapacitorMode()) {
-                  window.open(targetUrl, '_system');
-                } else {
-                  window.location.href = targetUrl;
-                }
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" style={{ marginRight: '8px' }}>
-                <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.25-.16-1.84H9v3.47h4.84c-.21 1.12-.84 2.07-1.79 2.7v2.24h2.9c1.69-1.55 2.69-3.85 2.69-6.57z"/>
-                <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.23l-2.9-2.24c-.8.54-1.84.87-3.06.87-2.35 0-4.34-1.58-5.05-3.72H.95v2.3C2.43 15.89 5.5 18 9 18z"/>
-                <path fill="#FBBC05" d="M3.95 10.68c-.18-.54-.28-1.12-.28-1.68s.1-1.14.28-1.68V5.02H.95C.34 6.22 0 7.57 0 9s.34 2.78.95 3.98l3-2.3z"/>
-                <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.47.89 11.43 0 9 0 5.5 0 2.43 2.11.95 5.02l3 2.3c.71-2.14 2.7-3.72 5.05-3.72z"/>
-              </svg>
-              SIGN IN WITH GOOGLE
-            </button>
-          </>
-        )}
-      </div>
+      <SSOLoginPanel
+        title="STAR-SWARM"
+        subtitle="Commander Terminal Link"
+        authError={authError || undefined}
+        buttonText="ESTABLISH COMMAND LINK"
+        isGooglePolling={isGooglePolling}
+        playOnline={playOnline}
+        onPlayOnlineChange={onPlayOnlineChange}
+        onLoginClick={onLoginClick}
+        onCancelGooglePoll={onCancelGooglePoll}
+        themeColor="#00f0ff"
+        icon={
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        }
+        containerClassName=""
+        cardClassName="glass-panel glass-panel-neon-cyan"
+        buttonClassName="btn-sci-fi"
+      />
     </div>
   );
 };

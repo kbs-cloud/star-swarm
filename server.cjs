@@ -403,6 +403,7 @@ app.get('/api/auth/callback', async (req, res) => {
   const stateParams = new URLSearchParams(state || '');
   const isElectron = stateParams.get('source') === 'electron';
   const token = stateParams.get('token') || '';
+  const isIframe = req.query.source === 'iframe';
 
   try {
     // Exchange the authorization code with kbs-auth server
@@ -436,6 +437,9 @@ app.get('/api/auth/callback', async (req, res) => {
                 pendingAuths.set(token, { error: 'session_fail', createdAt: Date.now() });
                 return renderAuthResponseHtml(res, 'Star-Swarm Session Error', 'SESSION DEPLOYMENT FAILURE', 'Failed to generate user commander session.', false);
               }
+              if (isIframe) {
+                return res.status(500).send('Session generation failed.');
+              }
               return res.redirect('/login?error=session_fail');
             }
 
@@ -450,6 +454,19 @@ app.get('/api/auth/callback', async (req, res) => {
             if (isElectron && token) {
               pendingAuths.set(token, { sessionId, createdAt: Date.now() });
               return renderAuthResponseHtml(res, 'Star-Swarm Authenticated', 'COMMAND PROTOCOL ESTABLISHED', 'Commander authenticated successfully. You can now close this tab and return to the Star-Swarm game console.', true);
+            }
+
+            if (isIframe) {
+              return res.send(`
+                <!DOCTYPE html>
+                <html>
+                  <body>
+                    <script>
+                      window.parent.postMessage({ type: 'SSO_LOGIN_SUCCESS' }, window.location.origin);
+                    </script>
+                  </body>
+                </html>
+              `);
             }
 
             res.redirect('/');
@@ -476,6 +493,9 @@ app.get('/api/auth/callback', async (req, res) => {
     if (isElectron && token) {
       pendingAuths.set(token, { error: 'oauth_failed', createdAt: Date.now() });
       return renderAuthResponseHtml(res, 'Star-Swarm Auth Error', 'AUTHENTICATION FAILURE', 'Failed to link SSO session.', false);
+    }
+    if (isIframe) {
+      return res.status(500).send('SSO exchange failed.');
     }
     res.redirect('/login?error=sso_failed');
   }
@@ -691,6 +711,87 @@ app.post('/api/logout', (req, res) => {
   }
   res.clearCookie('session_id');
   res.status(200).json({ success: true, message: 'Logged out successfully.' });
+});
+
+// Helper to verify JWT signature using pure Node crypto module (offline verification)
+function verifyJWT(token, publicKeyPem) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const data = headerB64 + '.' + payloadB64;
+    const signature = Buffer.from(signatureB64, 'base64url');
+
+    const verify = crypto.createVerify('SHA256');
+    verify.update(data);
+    const isValid = verify.verify(publicKeyPem, signature);
+
+    if (!isValid) return null;
+
+    const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf8');
+    return JSON.parse(payloadJson);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Endpoint: Back-channel logout for SLO (Asymmetric JWT verification)
+app.post('/api/auth/backchannel-logout', async (req, res) => {
+  const { logout_token } = req.body;
+  if (!logout_token) {
+    return res.status(400).json({ error: 'Missing logout_token.' });
+  }
+
+  try {
+    // 1. Fetch public key from auth server
+    const authServerUrl = process.env.AUTH_SERVER_URL || 'http://localhost:29001';
+    const certsRes = await fetch(`${authServerUrl}/api/auth/certs`);
+    if (!certsRes.ok) {
+      throw new Error(`Failed to fetch certs from auth server: ${certsRes.status}`);
+    }
+    const { keys } = await certsRes.json();
+    const activeKey = keys?.find(k => k.kid === 'sso-key-1');
+    if (!activeKey || !activeKey.pem) {
+      throw new Error('Active public key not found in auth certs.');
+    }
+
+    // 2. Verify JWT signature
+    const payload = verifyJWT(logout_token, activeKey.pem);
+    if (!payload) {
+      return res.status(401).json({ error: 'Invalid logout token signature.' });
+    }
+
+    // 3. Validate claims
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.iss !== 'kbs-auth') {
+      return res.status(401).json({ error: 'Invalid issuer.' });
+    }
+    if (payload.aud !== 'starswarm') {
+      return res.status(401).json({ error: 'Invalid audience.' });
+    }
+    if (payload.exp < now) {
+      return res.status(401).json({ error: 'Logout token expired.' });
+    }
+
+    const email = payload.sub;
+    if (!email) {
+      return res.status(400).json({ error: 'Missing subject (email).' });
+    }
+
+    // 4. Invalidate sessions
+    db.run('DELETE FROM sessions WHERE email = ?', [email], (err) => {
+      if (err) {
+        console.error('Error clearing sessions for email:', email, err.message);
+        return res.status(500).json({ error: 'Database error clearing sessions.' });
+      }
+      console.log(`[Back-Channel Logout] Cleared local starswarm sessions for ${email}`);
+      res.status(200).json({ success: true, message: 'Sessions cleared successfully.' });
+    });
+  } catch (error) {
+    console.error('[Back-Channel Logout] Verification failed:', error.message);
+    res.status(400).json({ error: error.message });
+  }
 });
 
 // Helper to compute turn status on backend for filtering

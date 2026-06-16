@@ -13,6 +13,12 @@ sudo rsync -av --delete \
   --exclude '.env' \
   /home/gemini/repos/kbs-cloud/starswarm/ /servers/starswarm/
 
+# 1b. Sync shared files to /servers/shared
+echo "Syncing shared files..."
+sudo mkdir -p /servers/shared
+sudo rsync -av --delete /home/gemini/repos/kbs-cloud/shared/ /servers/shared/
+sudo chown -R gemini:gemini /servers/shared
+
 # 2. Install/update dependencies in live directory
 echo "Installing dependencies in production directory..."
 cd /servers/starswarm
