@@ -152,6 +152,16 @@ function generateInviteCode() {
   return result;
 }
 
+// Helper: generate a random space/sci-fi game name
+function generateRandomGameName() {
+  const prefixes = ['Nebula', 'Solar', 'Void', 'Star', 'Nova', 'Cosmo', 'Astra', 'Galactic', 'Orion', 'Hyperion'];
+  const nouns = ['Swarm', 'Nest', 'Fleet', 'Sector', 'System', 'Cluster', 'Skirmish', 'Domain', 'Concourse', 'Cruiser'];
+  const p = prefixes[Math.floor(Math.random() * prefixes.length)];
+  const n = nouns[Math.floor(Math.random() * nouns.length)];
+  return `${p}-${n} ${Math.floor(100 + Math.random() * 900)}`;
+}
+
+
 // Generate a unique invite code checking against the database
 function generateUniqueInviteCode(callback) {
   const code = generateInviteCode();
@@ -1235,8 +1245,9 @@ app.post('/api/games/sync', validateCSRF, (req, res) => {
 app.post('/api/games', validateCSRF, (req, res) => {
   getSessionUser(req, (err, user) => {
     const { name, game_state, setupOptions } = req.body;
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return res.status(400).json({ error: 'Invalid game name.' });
+    let gameName = name && typeof name === 'string' ? name.trim() : '';
+    if (!gameName) {
+      gameName = generateRandomGameName();
     }
 
     let stateToSave;
@@ -1266,7 +1277,7 @@ app.post('/api/games', validateCSRF, (req, res) => {
       const now = new Date().toISOString();
       db.run(
         'INSERT INTO games (id, invite_code, owner_email, name, game_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [gameId, inviteCode, ownerEmail, name.trim(), gameStateStr, now, now],
+        [gameId, inviteCode, ownerEmail, gameName, gameStateStr, now, now],
         function (insertErr) {
           if (insertErr) {
             console.error('Error creating game:', insertErr.message);
@@ -1276,7 +1287,7 @@ app.post('/api/games', validateCSRF, (req, res) => {
             success: true,
             gameId,
             inviteCode,
-            name: name.trim(),
+            name: gameName,
             message: 'Game simulation saved to database.'
           });
         }
