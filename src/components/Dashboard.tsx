@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
 import { GameState, StarSystem, SHIP_TYPES, UPGRADES, Player, NORMAL_RULES } from '../game/gameState';
+import { TacticalReportsPanel } from './dashboard/TacticalReportsPanel';
+import { CommandActionsPanel } from './dashboard/CommandActionsPanel';
+import { DominionRegistryPanel } from './dashboard/DominionRegistryPanel';
+import { ActiveSwarmsPanel } from './dashboard/ActiveSwarmsPanel';
+import { TacticalQueuePanel } from './dashboard/TacticalQueuePanel';
+import { SystemInspectorPanel } from './dashboard/SystemInspectorPanel';
+import { FleetInspectorPanel } from './dashboard/FleetInspectorPanel';
+import { FleetDispatchPanel } from './dashboard/FleetDispatchPanel';
+import { HyperwavePresencePanel } from './dashboard/HyperwavePresencePanel';
 
 interface DashboardProps {
   gameState: GameState;
@@ -87,16 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const selectedFleet = gameState.fleets.find(f => f.id === selectedFleetId) || null;
   const activeRules = gameState.rules || NORMAL_RULES;
 
-  const getShipIcon = (type: string) => {
-    switch (type.toLowerCase()) {
-      case 'scout': return '🛰️';
-      case 'fighter': return '🛸';
-      case 'corvette': return '🚀';
-      case 'cruiser': return '🚢';
-      case 'dreadnought': return '🔱';
-      default: return '🛸';
-    }
-  };
+
 
   const activePlayerSlot = gameState.players.find(p => p.id === activePlayerId) || gameState.players[gameState.activePlayerIdx];
   const isMyTurn = activePlayerSlot && isPlayerLocalToClient(activePlayerSlot) && !activePlayerSlot.endedTurn;
@@ -162,23 +162,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const isMySystem = selectedSystem?.owner === activePlayerId;
   const isMyFleet = selectedFleet?.owner === activePlayerId;
 
-  // Max build capacity
-  const maxBuildCapacity = selectedSystem ? selectedSystem.shipyardLvl + 1 : 0;
 
-  // Handle setting maximum quantity of ships to dispatch
-  const handleSetMaxDispatch = (shipType: string) => {
-    if (!selectedSystem) return;
-    const maxQty = selectedSystem.ships[shipType] || 0;
-    setDispatchQty(prev => ({ ...prev, [shipType]: maxQty }));
-  };
-
-  // Handle input adjustment
-  const handleDispatchQtyChange = (shipType: string, val: number) => {
-    if (!selectedSystem) return;
-    const maxQty = selectedSystem.ships[shipType] || 0;
-    const qty = Math.max(0, Math.min(maxQty, val));
-    setDispatchQty(prev => ({ ...prev, [shipType]: qty }));
-  };
 
   const executeDispatch = () => {
     if (!targetSystem) return;
@@ -210,187 +194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return Math.round(def.baseCost * (def.multiplier ** (lvl - (type === 'Shields' ? 0 : 1))));
   };
 
-  const renderCombatLog = () => {
-    const myTeam = activePlayerId ? gameState.playerState[activePlayerId]?.team : null;
-    const visibleLogs = gameState.combatLog.filter(log => {
-      if (log.type === 'battle') {
-        const attackerTeam = log.attacker ? gameState.playerState[log.attacker]?.team : null;
-        const defenderTeam = (log.defender && log.defender !== 0) ? gameState.playerState[log.defender]?.team : null;
-        return (
-          log.attacker === activePlayerId ||
-          (attackerTeam !== null && attackerTeam === myTeam) ||
-          log.defender === activePlayerId ||
-          (defenderTeam !== null && defenderTeam === myTeam)
-        );
-      }
-      if (log.type === 'merge') {
-        const mergePlayerTeam = log.playerId ? gameState.playerState[log.playerId]?.team : null;
-        return (
-          log.playerId === activePlayerId ||
-          (mergePlayerTeam !== null && mergePlayerTeam === myTeam)
-        );
-      }
-      if (log.type === 'elimination') {
-        return true;
-      }
-      return false;
-    });
 
-    if (visibleLogs.length === 0) {
-      return <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No tactical reports recorded.</div>;
-    }
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto' }}>
-        {visibleLogs.map((log, idx) => {
-          if (log.type === 'battle' && log.results) {
-            const r = log.results;
-            const attackerColor = gameState.playerState[r.attackerId]?.color || '#ffffff';
-            const defenderColor = gameState.playerState[r.defenderId]?.color || '#ffffff';
-            const isWinnerAttacker = r.winner === r.attackerId;
-            const systemName = log.systemName;
-
-            return (
-              <div key={idx} style={{
-                background: 'rgba(255, 0, 127, 0.05)',
-                border: '1px solid rgba(255, 0, 127, 0.15)',
-                borderRadius: '6px',
-                padding: '8px',
-                fontSize: '12px'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>
-                    BATTLE: <strong style={{ color: attackerColor }}>F{r.attackerId}</strong> vs{' '}
-                    <strong style={{ color: defenderColor }}>F{r.defenderId}</strong> at {systemName}
-                  </span>
-                  <button
-                    className="btn-sci-fi"
-                    style={{ padding: '2px 6px', fontSize: '9px' }}
-                    onClick={() => setSelectedBattleLogIndex(selectedBattleLogIndex === idx ? null : idx)}
-                  >
-                    {selectedBattleLogIndex === idx ? 'HIDE' : 'LOGS'}
-                  </button>
-                </div>
-                <div style={{ marginTop: '4px', color: 'var(--text-secondary)' }}>
-                  Winner: <strong style={{ color: isWinnerAttacker ? attackerColor : defenderColor }}>
-                    {isWinnerAttacker ? 'Attacker' : 'Defender'}
-                  </strong>
-                </div>
-
-                {selectedBattleLogIndex === idx && (
-                  <div style={{
-                    marginTop: '8px',
-                    maxHeight: '120px',
-                    overflowY: 'auto',
-                    borderTop: '1px solid rgba(255, 0, 127, 0.2)',
-                    paddingTop: '6px',
-                    fontFamily: 'Share Tech Mono',
-                    fontSize: '11px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px'
-                  }}>
-                    <div>ATTACKER INVENTORY: {Object.entries(r.startAttacker).map(([t, q]) => `${t}:${q}`).join(', ')}</div>
-                    <div>DEFENDER INVENTORY: {Object.entries(r.startDefender).map(([t, q]) => `${t}:${q}`).join(', ')}</div>
-                    {r.log.map((round, rIdx) => (
-                      <div key={rIdx} style={{ color: 'var(--accent-yellow)' }}>
-                        Round {round.round}: Hits A:{round.attackerHits} / D:{round.defenderHits}
-                      </div>
-                    ))}
-                    <div style={{ color: 'var(--accent-green)' }}>
-                      Surviving Attacker: {Object.entries(r.endAttacker).map(([t, q]) => `${t}:${q}`).join(', ')}
-                    </div>
-                    <div style={{ color: 'var(--accent-cyan)' }}>
-                      Surviving Defender: {Object.entries(r.endDefender).map(([t, q]) => `${t}:${q}`).join(', ')}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          }
-
-          if (log.type === 'merge') {
-            const faction = gameState.playerState[log.playerId || 0] || { name: 'Neutral / Independent', color: '#8ba2b5' };
-            return (
-              <div key={idx} style={{
-                background: 'rgba(0, 240, 255, 0.03)',
-                border: '1px solid rgba(0, 240, 255, 0.08)',
-                borderRadius: '6px',
-                padding: '6px 8px',
-                fontSize: '12px',
-                color: 'var(--text-secondary)'
-              }}>
-                Fleet reinforcement arrived at <strong style={{ color: faction?.color }}>{log.systemName}</strong>
-              </div>
-            );
-          }
-
-          if (log.type === 'elimination') {
-            const eliminatedPlayer = gameState.playerState[log.playerId || 0];
-            return (
-              <div key={idx} style={{
-                background: 'rgba(255, 0, 0, 0.1)',
-                border: '1px solid rgba(255, 0, 0, 0.3)',
-                borderRadius: '6px',
-                padding: '6px 8px',
-                fontSize: '12px',
-                color: 'var(--accent-magenta)',
-                fontWeight: 'bold',
-                textAlign: 'center'
-              }}>
-                [DESTRUCTION ALERT] {eliminatedPlayer?.name} has been completely eliminated!
-              </div>
-            );
-          }
-
-          return null;
-        })}
-      </div>
-    );
-  };
-
-  const renderActionLog = () => {
-    const actionLog = gameState.actionLog || [];
-    if (actionLog.length === 0) {
-      return <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No command actions logged.</div>;
-    }
-
-    const sortedLog = [...actionLog].reverse();
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto' }}>
-        {sortedLog.map((log, idx) => {
-          const timestampStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          const playerColor = gameState.playerState[log.playerId]?.color || '#ffffff';
-          
-          return (
-            <div key={idx} style={{
-              background: 'rgba(0, 240, 255, 0.03)',
-              border: '1px solid rgba(0, 240, 255, 0.1)',
-              borderRadius: '6px',
-              padding: '6px 8px',
-              fontSize: '11px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '2px'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="telemetry" style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
-                  TURN {log.turnNumber} · {timestampStr}
-                </span>
-                <span style={{ color: playerColor, fontWeight: 'bold' }}>
-                  {log.playerName}
-                </span>
-              </div>
-              <div style={{ color: 'var(--text-secondary)', fontFamily: 'Share Tech Mono' }}>
-                {log.details}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
 
   const ownedSystems = gameState.systems.filter(s => s.owner === activePlayerId);
   const ownedFleets = gameState.fleets.filter(f => f.owner === activePlayerId);
@@ -867,323 +671,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }}>
         {/* star system inspector */}
         {selectedSystem && (
-          <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }} className="glass-panel">
-            <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>STAR CLUSTER TELEMETRY</span>
-                <h2 className="text-neon-cyan" style={{ fontSize: '22px', margin: '4px 0', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  {selectedSystem.isHomePlanet && <span title="Capital Planet" style={{ fontSize: '18px' }}>👑</span>}
-                  {selectedSystem.name}
-                  {selectedSystem.isHomePlanet && (
-                    <span style={{
-                      fontSize: '10px',
-                      background: 'rgba(0, 240, 255, 0.15)',
-                      color: 'var(--accent-cyan)',
-                      border: '1px solid rgba(0, 240, 255, 0.3)',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      fontFamily: 'Share Tech Mono',
-                      letterSpacing: '1px'
-                    }}>
-                      CAPITAL
-                    </span>
-                  )}
-                </h2>
-              </div>
-              <button
-                className="btn-sci-fi btn-danger"
-                style={{ padding: '4px 8px', fontSize: '10px' }}
-                onClick={() => setSelectedSystemId(null)}
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-              Coordinates: <span className="telemetry">{selectedSystem.x} LY, {selectedSystem.y} LY</span>
-            </div>
-            <div style={{ fontSize: '13px', color: selectedSystem.owner === 0 ? '#8ba2b5' : (gameState.playerState[selectedSystem.owner]?.color || '#ffffff'), marginBottom: '4px' }}>
-              Owner: <strong>{selectedSystem.owner === 0 ? 'Neutral / Independent' : (gameState.playerState[selectedSystem.owner]?.name || 'Unknown')}</strong>
-            </div>
-            {activeRules.enableCredits && selectedSystem.owner !== 0 && (
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Generates +{selectedSystem.resourcesPerTurn} resources/turn
-              </div>
-            )}
-
-            <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />
-
-            {/* Check vision for detailed stats */}
-            {gameState.systems.find(s => s.id === selectedSystemId) && (
-              <>
-                {/* Systems values */}
-                {selectedSystem.owner !== 0 && gameState.playerState[activePlayerId]?.team !== gameState.playerState[selectedSystem.owner]?.team ? (
-                  /* Enemy System - FOG OF WAR DETAILS HIDE */
-                  <div style={{
-                    padding: '12px',
-                    background: 'rgba(255, 0, 127, 0.05)',
-                    border: '1px solid rgba(255, 0, 127, 0.2)',
-                    borderRadius: '6px',
-                    color: 'var(--accent-magenta)',
-                    fontSize: '13px',
-                    textAlign: 'center',
-                    marginBottom: '10px'
-                  }}>
-                    [WARNING] SCANS BLOCKED by enemy Deflector Shields. Stationed ship counts and build queue sizes are hidden!
-                  </div>
-                ) : (
-                  /* Friendly/Allied system or neutral system details */
-                  <div>
-                    <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--text-primary)' }}>STATIONED FLEETS</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-                      {Object.entries(selectedSystem.ships).map(([shipType, qty]) => (
-                        <div key={shipType} style={{
-                          background: 'rgba(255,255,255,0.03)',
-                          border: '1px solid rgba(255,255,255,0.06)',
-                          borderRadius: '6px',
-                          padding: '8px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}>
-                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{shipType}</span>
-                          <span className="telemetry" style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-cyan)' }}>{qty}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* If is my system, show Upgrades & Production */}
-                {isMySystem && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                    {/* PRODUCTION QUEUE */}
-                    {!activeRules.nodeProduction?.enabled && (
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                          <span>Shipyard Queue</span>
-                          <span className="telemetry" style={{ color: 'var(--accent-green)' }}>{selectedSystem.buildQueue.length} / {maxBuildCapacity}</span>
-                        </div>
-                        
-                        {selectedSystem.buildQueue.length > 0 ? (
-                          <div style={{
-                            background: 'rgba(57, 255, 20, 0.05)',
-                            border: '1px solid rgba(57, 255, 20, 0.2)',
-                            padding: '10px',
-                            borderRadius: '6px',
-                            marginBottom: '10px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '6px'
-                          }}>
-                            {selectedSystem.buildQueue.map((job, idx) => (
-                              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                                <span>{idx === 0 ? '[CURRENT] ' : ''}{job.shipType}</span>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <span className="telemetry" style={{ color: 'var(--accent-green)' }}>
-                                    {job.turnsRemaining} {job.turnsRemaining === 1 ? 'Turn' : 'Turns'} left
-                                  </span>
-                                  <button
-                                    className="btn-sci-fi btn-danger"
-                                    style={{ padding: '0 4px', fontSize: '8px' }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onCancelProduction(selectedSystem.id, idx);
-                                    }}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic', marginBottom: '10px' }}>
-                            Production yards idle.
-                          </div>
-                        )}
-
-                        {/* Add Ship buttons */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                          {Object.entries(activeRules.ships).map(([type, def]) => (
-                            <button
-                              key={type}
-                              className="btn-sci-fi"
-                              style={{ padding: '6px 4px', fontSize: '11px', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}
-                              onClick={() => onQueueShip(type)}
-                              disabled={(activeRules.enableCredits && activePlayer.resources < def.cost) || selectedSystem.buildQueue.length >= maxBuildCapacity}
-                              title={`${type} (${def.cost} CR)`}
-                            >
-                              {compactMode ? (
-                                <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{getShipIcon(type)} {type.substring(0,3).toUpperCase()}</span>
-                              ) : (
-                                <span style={{ fontWeight: 'bold' }}>+ {type}</span>
-                              )}
-                              {activeRules.enableCredits && (
-                                <span className="telemetry" style={{ fontSize: '10px', opacity: 0.8 }}>({def.cost} CR)</span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* UPGRADE INFRASTRUCTURE */}
-                    {activeRules.enableUpgrades && (
-                      <div>
-                        <h3 style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--text-primary)' }}>UPGRADE SYSTEMS</h3>
-                        <div style={compactMode ? { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' } : { display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {/* SHIPYARD */}
-                          <div style={compactMode ? {
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: 'rgba(255,255,255,0.02)',
-                            padding: '6px 4px',
-                            borderRadius: '6px',
-                            border: '1px solid rgba(255,255,255,0.05)'
-                          } : { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div style={compactMode ? { textAlign: 'center' } : {}}>
-                              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>🏗️ SYD ({selectedSystem.shipyardLvl})</span>
-                              {!compactMode && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand build limit & reduce times</div>}
-                            </div>
-                            <button
-                              className="btn-sci-fi"
-                              style={{ padding: '4px 6px', fontSize: '10px', width: compactMode ? '100%' : 'auto', justifyContent: 'center' }}
-                              onClick={() => onUpgradeSystem('Shipyard', selectedSystem.id)}
-                              disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Shipyard', selectedSystem)}
-                            >
-                              {getUpgradeCost('Shipyard', selectedSystem)}{activeRules.enableCredits ? ' CR' : ''}
-                            </button>
-                          </div>
-
-                          {/* SENSORS */}
-                          <div style={compactMode ? {
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: 'rgba(255,255,255,0.02)',
-                            padding: '6px 4px',
-                            borderRadius: '6px',
-                            border: '1px solid rgba(255,255,255,0.05)'
-                          } : { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div style={compactMode ? { textAlign: 'center' } : {}}>
-                              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>📡 SNS ({selectedSystem.sensorLvl})</span>
-                              {!compactMode && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Expand map scanner range</div>}
-                            </div>
-                            <button
-                              className="btn-sci-fi"
-                              style={{ padding: '4px 6px', fontSize: '10px', width: compactMode ? '100%' : 'auto', justifyContent: 'center' }}
-                              onClick={() => onUpgradeSystem('Sensors', selectedSystem.id)}
-                              disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Sensors', selectedSystem)}
-                            >
-                              {getUpgradeCost('Sensors', selectedSystem)}{activeRules.enableCredits ? ' CR' : ''}
-                            </button>
-                          </div>
-
-                          {/* SHIELDS */}
-                          <div style={compactMode ? {
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: 'rgba(255,255,255,0.02)',
-                            padding: '6px 4px',
-                            borderRadius: '6px',
-                            border: '1px solid rgba(255,255,255,0.05)'
-                          } : { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div style={compactMode ? { textAlign: 'center' } : {}}>
-                              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>🛡️ SHD ({selectedSystem.shieldsLvl})</span>
-                              {!compactMode && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Absorbs combat damage</div>}
-                            </div>
-                            <button
-                              className="btn-sci-fi"
-                              style={{ padding: '4px 6px', fontSize: '10px', width: compactMode ? '100%' : 'auto', justifyContent: 'center' }}
-                              onClick={() => onUpgradeSystem('Shields', selectedSystem.id)}
-                              disabled={activeRules.enableCredits && activePlayer.resources < getUpgradeCost('Shields', selectedSystem)}
-                            >
-                              {getUpgradeCost('Shields', selectedSystem)}{activeRules.enableCredits ? ' CR' : ''}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          <SystemInspectorPanel
+            selectedSystem={selectedSystem}
+            gameState={gameState}
+            activePlayerId={activePlayerId}
+            setSelectedSystemId={setSelectedSystemId}
+            onQueueShip={onQueueShip}
+            onUpgradeSystem={onUpgradeSystem}
+            onCancelProduction={onCancelProduction}
+            getUpgradeCost={getUpgradeCost}
+            isMySystem={isMySystem}
+            compactMode={compactMode}
+          />
         )}
 
         {/* fleet inspector */}
         {selectedFleet && (
-          <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', padding: '16px', overflowY: 'auto' }} className="glass-panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-              <div>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>FLEET SCANNERS ACTIVE</span>
-                <h2 className="text-neon-yellow" style={{ fontSize: '20px', margin: '4px 0' }}>Swarms Sector {Math.round(selectedFleet.currentPos.x)}, {Math.round(selectedFleet.currentPos.y)}</h2>
-              </div>
-              <button
-                className="btn-sci-fi btn-danger"
-                style={{ padding: '4px 8px', fontSize: '10px' }}
-                onClick={() => setSelectedFleetId(null)}
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div style={{ fontSize: '13px', marginBottom: '6px' }}>
-              Owner: <strong style={{ color: gameState.playerState[selectedFleet.owner]?.color || '#ffffff' }}>{gameState.playerState[selectedFleet.owner]?.name || 'Unknown'}</strong>
-            </div>
-
-            <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />
-
-            <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>SHIPS IN FLEET</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '15px' }}>
-              {Object.entries(selectedFleet.ships).map(([shipType, qty]) => (
-                <div key={shipType} style={{
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: '6px',
-                  padding: '8px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{shipType}</span>
-                  <span className="telemetry" style={{ fontWeight: 'bold', color: 'var(--accent-yellow)', fontSize: '14px' }}>{qty}</span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{
-              background: 'rgba(0, 240, 255, 0.02)',
-              border: '1px solid rgba(0, 240, 255, 0.08)',
-              borderRadius: '6px',
-              padding: '10px',
-              fontSize: '12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
-              marginBottom: '15px'
-            }}>
-              <div>Origin Point: <strong>{selectedFleet.source.name}</strong></div>
-              <div>Destination Point: <strong>{selectedFleet.destination.name}</strong></div>
-              <div>Speed: <strong className="telemetry">{selectedFleet.speed.toFixed(1)} LY/turn</strong></div>
-              <div>Turns Remaining: <strong className="telemetry" style={{ color: 'var(--accent-green)' }}>{selectedFleet.turnsRemaining} turns</strong></div>
-              {selectedFleet.isRecalling && (
-                <div style={{ color: 'var(--accent-magenta)', fontWeight: 'bold' }}>RECALL SUBROUTINE ACTIVE: Returning to source base.</div>
-              )}
-            </div>
-
-            {isMyFleet && !selectedFleet.isRecalling && (
-              <button className="btn-sci-fi btn-danger" onClick={() => onRecallFleet(selectedFleet.id)}>
-                CANCEL TRAVEL & RECALL FLEET
-              </button>
-            )}
-          </div>
+          <FleetInspectorPanel
+            selectedFleet={selectedFleet}
+            gameState={gameState}
+            setSelectedFleetId={setSelectedFleetId}
+            onRecallFleet={onRecallFleet}
+            isMyFleet={isMyFleet}
+          />
         )}
 
         {/* STRATEGIC CONSOLE (always shown, fills remaining space) */}
@@ -1219,43 +729,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               
               {showDominion && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
-                  {ownedSystems.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic', padding: '4px' }}>No stars claimed.</div>
-                  ) : (
-                    ownedSystems.map(sys => (
-                      <div
-                        key={sys.id}
-                        onClick={() => {
-                          setSelectedSystemId(sys.id);
-                          setSelectedFleetId(null);
-                          onCenterOnCoords(sys.x, sys.y);
-                        }}
-                        style={{
-                          background: selectedSystemId === sys.id ? 'rgba(0, 240, 255, 0.08)' : 'rgba(0, 240, 255, 0.02)',
-                          border: selectedSystemId === sys.id ? '1px solid var(--accent-cyan)' : '1px solid rgba(0, 240, 255, 0.1)',
-                          padding: '8px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                          <strong style={{ color: 'var(--accent-cyan)' }}>{sys.name}</strong>
-                          <span className="telemetry" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{sys.x}, {sys.y} LY</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          <span>Defense: {Object.entries(sys.ships).map(([t, q]) => q > 0 ? `${t.substring(0,2)}:${q}` : '').filter(Boolean).join(', ') || 'None'}</span>
-                          {activeRules.enableCredits && (
-                            <span className="telemetry" style={{ color: 'var(--accent-green)' }}>+{sys.resourcesPerTurn} CR</span>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                <DominionRegistryPanel
+                  ownedSystems={ownedSystems}
+                  selectedSystemId={selectedSystemId}
+                  setSelectedSystemId={setSelectedSystemId}
+                  setSelectedFleetId={setSelectedFleetId}
+                  onCenterOnCoords={onCenterOnCoords}
+                  enableCredits={activeRules.enableCredits}
+                />
               )}
             </div>
 
@@ -1285,44 +766,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               
               {showActiveSwarms && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
-                  {ownedFleets.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic', padding: '4px' }}>No active fleets.</div>
-                  ) : (
-                    ownedFleets.map(fleet => (
-                      <div
-                        key={fleet.id}
-                        onClick={() => {
-                          setSelectedFleetId(fleet.id);
-                          setSelectedSystemId(null);
-                          onCenterOnCoords(fleet.currentPos.x, fleet.currentPos.y);
-                        }}
-                        style={{
-                          background: selectedFleetId === fleet.id ? 'rgba(255, 170, 0, 0.08)' : 'rgba(255, 170, 0, 0.02)',
-                          border: selectedFleetId === fleet.id ? '1px solid var(--accent-yellow)' : '1px solid rgba(255, 170, 0, 0.1)',
-                          padding: '8px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                          <strong style={{ color: 'var(--accent-yellow)' }}>
-                            {fleet.source.name} → {fleet.destination.name}
-                          </strong>
-                          <span className="telemetry" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
-                            {fleet.turnsRemaining}t left {fleet.isRecalling ? '(REC)' : ''}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          Swarm: {Object.entries(fleet.ships).map(([t, q]) => q > 0 ? `${t}:${q}` : '').filter(Boolean).join(', ')}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                <ActiveSwarmsPanel
+                  ownedFleets={ownedFleets}
+                  selectedFleetId={selectedFleetId}
+                  setSelectedFleetId={setSelectedFleetId}
+                  setSelectedSystemId={setSelectedSystemId}
+                  onCenterOnCoords={onCenterOnCoords}
+                />
               )}
             </div>
 
@@ -1352,85 +802,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               
               {showTacticalQueue && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
-                  {cancelableFleets.length === 0 && cancelableBuilds.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic', padding: '4px' }}>No pending orders this turn.</div>
-                  ) : (
-                    <>
-                      {/* Fleet dispatches */}
-                      {cancelableFleets.map(f => (
-                        <div
-                          key={f.id}
-                          style={{
-                            background: 'rgba(255, 0, 127, 0.03)',
-                            border: '1px solid rgba(255, 0, 127, 0.1)',
-                            padding: '8px',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            gap: '8px',
-                          }}
-                        >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--accent-magenta)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              Launch: {f.source.name} → {f.destination.name}
-                            </div>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {Object.entries(f.ships).map(([t, q]) => q > 0 ? `${t}:${q}` : '').filter(Boolean).join(', ')}
-                            </div>
-                          </div>
-                          <button
-                            className="btn-sci-fi btn-danger"
-                            style={{ padding: '2px 8px', fontSize: '9px' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onCancelDispatch(f.id);
-                            }}
-                          >
-                            CANCEL
-                          </button>
-                        </div>
-                      ))}
-                      
-                      {/* Production jobs */}
-                      {cancelableBuilds.map((b, bIdx) => (
-                        <div
-                          key={`${b.systemId}-${b.jobIndex}-${bIdx}`}
-                          style={{
-                            background: 'rgba(57, 255, 20, 0.03)',
-                            border: '1px solid rgba(57, 255, 20, 0.1)',
-                            padding: '8px',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            gap: '8px',
-                          }}
-                        >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--accent-green)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              Build: {b.job.shipType} @ {b.systemName}
-                            </div>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                              Queue Position: #{b.jobIndex + 1} ({b.job.turnsRemaining}t left)
-                            </div>
-                          </div>
-                          <button
-                            className="btn-sci-fi btn-danger"
-                            style={{ padding: '2px 8px', fontSize: '9px' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onCancelProduction(b.systemId, b.jobIndex);
-                            }}
-                          >
-                            CANCEL
-                          </button>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </div>
+                <TacticalQueuePanel
+                  cancelableFleets={cancelableFleets}
+                  cancelableBuilds={cancelableBuilds}
+                  onCancelDispatch={onCancelDispatch}
+                  onCancelProduction={onCancelProduction}
+                />
               )}
             </div>
 
@@ -1467,117 +844,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }}>
         {/* FLEET DISPATCH FORM */}
         {selectedSystem && isMySystem && (
-          <div style={{ display: 'flex', flexDirection: 'column', padding: '16px' }} className="glass-panel">
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>SWARM LAUNCH CONTROLLER</span>
-            <h2 className="text-neon-green" style={{ fontSize: '18px', margin: '4px 0 10px' }}>DISPATCH SWARM</h2>
-
-            {targetSystem ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{
-                  padding: '10px',
-                  background: 'rgba(57, 255, 20, 0.05)',
-                  border: '1px solid rgba(57, 255, 20, 0.15)',
-                  borderRadius: '6px',
-                  fontSize: '12px'
-                }}>
-                  Target System: <strong>{targetSystem.name} ({targetSystem.x}, {targetSystem.y})</strong>
-                  <div style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>
-                    Distance: <span className="telemetry">{(Math.sqrt((targetSystem.x - selectedSystem.x) ** 2 + (targetSystem.y - selectedSystem.y) ** 2)).toFixed(1)} LY</span>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {Object.keys(activeRules.ships).map(shipType => {
-                    const availableQty = selectedSystem.ships[shipType] || 0;
-                    return (
-                      <div key={shipType} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                          <span>{shipType} (Available: {availableQty})</span>
-                          <button
-                            className="btn-sci-fi"
-                            style={{ padding: '0 6px', fontSize: '9px' }}
-                            onClick={() => handleSetMaxDispatch(shipType)}
-                          >
-                            MAX
-                          </button>
-                        </div>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <input
-                            type="range"
-                            min="0"
-                            max={availableQty}
-                            value={dispatchQty[shipType] || 0}
-                            onChange={(e) => handleDispatchQtyChange(shipType, parseInt(e.target.value))}
-                            style={{ flex: 1, accentColor: 'var(--accent-cyan)' }}
-                          />
-                          <input
-                            type="number"
-                            min="0"
-                            max={availableQty}
-                            value={dispatchQty[shipType] || 0}
-                            onChange={(e) => handleDispatchQtyChange(shipType, parseInt(e.target.value) || 0)}
-                            style={{
-                              width: '50px',
-                              background: 'rgba(0,0,0,0.5)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              color: 'white',
-                              borderRadius: '4px',
-                              padding: '2px 4px',
-                              fontSize: '12px',
-                              textAlign: 'center',
-                              fontFamily: 'Share Tech Mono'
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                  <button className="btn-sci-fi" onClick={executeDispatch} style={{ flex: 1 }}>
-                    LAUNCH SHIPS
-                  </button>
-                  <button className="btn-sci-fi btn-danger" onClick={() => setTargetSystem(null)}>
-                    CANCEL
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{
-                border: '1px dashed rgba(0, 240, 255, 0.2)',
-                background: 'rgba(0, 240, 255, 0.02)',
-                padding: '16px',
-                borderRadius: '8px',
-                textAlign: 'center',
-                color: 'var(--text-secondary)',
-                fontSize: '12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px',
-                alignItems: 'center'
-              }}>
-                <div>
-                  To deploy a traveling swarm, select a base you own, then Ctrl + left-click on any other star system on the map to set it as destination.
-                </div>
-                {(isMobile || compactMode) && (
-                  <button
-                    className={`btn-sci-fi ${isSelectingTarget ? 'btn-danger' : ''}`}
-                    onClick={() => {
-                      setIsSelectingTarget(!isSelectingTarget);
-                      if (isMobile) {
-                        // Switch to map tab so player can choose the target
-                        setActiveMobileTab('map');
-                      }
-                    }}
-                    style={{ padding: '8px 16px', fontSize: '11px', width: '100%', justifyContent: 'center' }}
-                  >
-                    {isSelectingTarget ? '🚫 CANCEL TARGETING' : '🎯 SET SWARM DESTINATION'}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          <FleetDispatchPanel
+            selectedSystem={selectedSystem}
+            targetSystem={targetSystem}
+            setTargetSystem={setTargetSystem}
+            dispatchQty={dispatchQty}
+            setDispatchQty={setDispatchQty}
+            executeDispatch={executeDispatch}
+            activeRules={activeRules}
+            isMobile={isMobile}
+            compactMode={compactMode}
+            isSelectingTarget={isSelectingTarget}
+            setIsSelectingTarget={setIsSelectingTarget}
+            setActiveMobileTab={setActiveMobileTab}
+          />
         )}
 
         {/* HYPERWAVE COMS PRESENCE */}
@@ -1587,174 +867,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <span>📡 HYPERWAVE PRESENCE</span>
           </h2>
           
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '180px' }}>
-            {gameState.players.map((player) => {
-              const isOnline = player.type === 'ai' || (player.assignedEmail && connectedPlayers.includes(player.assignedEmail)) || (player.id === 1 && connectedPlayers.includes(gameOwnerEmail));
-              const playerStateInfo = gameState.playerState[player.id];
-              const isOwner = gameOwnerEmail === currentUserEmail;
-              const isMe = player.assignedEmail === currentUserEmail;
-
-              return (
-                <div key={player.id} style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  fontSize: '12px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                    <div 
-                      onClick={() => handleCenterOnHome(player.id)}
-                      title={`Center on ${player.name}'s Home Planet`}
-                      style={{
-                        width: '10px',
-                        height: '10px',
-                        borderRadius: '50%',
-                        background: player.color || '#ffffff',
-                        boxShadow: `0 0 6px ${player.color}`,
-                        cursor: 'pointer',
-                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-                      }} 
-                      onMouseOver={(e) => {
-                        e.currentTarget.style.transform = 'scale(1.4)';
-                        e.currentTarget.style.boxShadow = `0 0 10px 2.5px ${player.color}`;
-                      }}
-                      onMouseOut={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)';
-                        e.currentTarget.style.boxShadow = `0 0 6px ${player.color}`;
-                      }}
-                    />
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        {isPlayerLocalToClient(player) ? (
-                          <input
-                            type="text"
-                            value={player.name}
-                            onChange={(e) => {
-                              onRenamePlayer(player.id, e.target.value);
-                            }}
-                            style={{
-                              background: 'rgba(0, 0, 0, 0.4)',
-                              border: '1px solid rgba(0, 240, 255, 0.3)',
-                              color: 'white',
-                              fontSize: '11px',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              width: '100px',
-                              fontFamily: 'Share Tech Mono'
-                            }}
-                          />
-                        ) : (
-                          <span>{player.name}</span>
-                        )}
-                        {player.type === 'ai' && (
-                          <span style={{
-                            fontSize: '9px',
-                            padding: '1px 4px',
-                            borderRadius: '3px',
-                            background: player.difficulty === 'hard'
-                              ? 'rgba(255, 0, 127, 0.15)'
-                              : player.difficulty === 'easy'
-                                ? 'rgba(57, 255, 20, 0.15)'
-                                : 'rgba(0, 240, 255, 0.15)',
-                            border: player.difficulty === 'hard'
-                              ? '1px solid rgba(255, 0, 127, 0.3)'
-                              : player.difficulty === 'easy'
-                                ? '1px solid rgba(57, 255, 20, 0.3)'
-                                : '1px solid rgba(0, 240, 255, 0.3)',
-                            color: player.difficulty === 'hard'
-                              ? 'var(--accent-magenta)'
-                              : player.difficulty === 'easy'
-                                ? 'var(--accent-green)'
-                                : 'var(--accent-cyan)',
-                            fontFamily: 'Share Tech Mono',
-                            letterSpacing: '0.5px'
-                          }}>
-                            {player.difficulty ? player.difficulty.toUpperCase() : 'AI'}
-                          </span>
-                        )}
-                        {isMe && <span style={{ fontSize: '9px', color: 'var(--accent-cyan)' }}>[YOU]</span>}
-                      </div>
-                      {player.type === 'human' && (
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {player.assignedEmail || 'Unassigned Link'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {/* Connection status */}
-                    <span style={{
-                      fontSize: '10px',
-                      color: isOnline ? 'var(--accent-green)' : 'var(--text-muted)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      <span style={{
-                        width: '6px',
-                        height: '6px',
-                        borderRadius: '50%',
-                        background: isOnline ? 'var(--accent-green)' : '#888'
-                      }} />
-                      {player.type === 'ai' ? 'AUTO' : (isOnline ? 'ONLN' : 'OFFL')}
-                    </span>
-
-                    {/* Turn Status */}
-                    {player.type === 'human' && !playerStateInfo?.lost && (
-                      <span style={{
-                        fontSize: '10px',
-                        color: player.endedTurn ? 'var(--accent-green)' : 'var(--accent-yellow)',
-                        fontFamily: 'Share Tech Mono'
-                      }}>
-                        {player.endedTurn ? 'READY' : 'WAIT'}
-                      </span>
-                    )}
-
-                    {/* Local Toggle Checkbox */}
-                    {player.type === 'human' && (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                        <input
-                          type="checkbox"
-                          checked={!!player.isLocal}
-                          disabled={!isOwner && !isMe}
-                          onChange={() => onTogglePlayerLocal(player.id)}
-                          style={{ accentColor: 'var(--accent-cyan)', margin: 0 }}
-                        />
-                        <span>LCL</span>
-                      </label>
-                    )}
-
-                    {/* Claim Button */}
-                    {player.type === 'human' && !player.assignedEmail && !isMe && (
-                      <button
-                        className="btn-sci-fi"
-                        style={{ padding: '2px 6px', fontSize: '9px', textTransform: 'uppercase' }}
-                        onClick={() => onClaimFaction(player.id)}
-                      >
-                        CLAIM
-                      </button>
-                    )}
-
-                    {/* Owner Assign Option: Clear or Assign if Owner */}
-                    {isOwner && player.type === 'human' && player.assignedEmail && player.id !== 1 && (
-                      <button
-                        className="btn-sci-fi btn-danger"
-                        style={{ padding: '2px 4px', fontSize: '9px' }}
-                        onClick={() => onAssignPlayerEmail(player.id, '')}
-                      >
-                        RESET
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <HyperwavePresencePanel
+            gameState={gameState}
+            connectedPlayers={connectedPlayers}
+            gameOwnerEmail={gameOwnerEmail}
+            currentUserEmail={currentUserEmail}
+            isPlayerLocalToClient={isPlayerLocalToClient}
+            onRenamePlayer={onRenamePlayer}
+            onTogglePlayerLocal={onTogglePlayerLocal}
+            onClaimFaction={onClaimFaction}
+            onAssignPlayerEmail={onAssignPlayerEmail}
+            onCenterOnCoords={onCenterOnCoords}
+            setSelectedSystemId={setSelectedSystemId}
+          />
         </div>
 
         {/* COMBAT AND INTELLIGENCE EVENTS LOG */}
@@ -1791,7 +916,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
           <h2 className="text-neon-magenta" style={{ fontSize: '18px', margin: '0 0 10px 0' }}>GALACTIC TELEMETRY</h2>
-          {logTab === 'tactical' ? renderCombatLog() : renderActionLog()}
+          {logTab === 'tactical' ? (
+            <TacticalReportsPanel
+              gameState={gameState}
+              activePlayerId={activePlayerId}
+              selectedBattleLogIndex={selectedBattleLogIndex}
+              setSelectedBattleLogIndex={setSelectedBattleLogIndex}
+            />
+          ) : (
+            <CommandActionsPanel
+              gameState={gameState}
+            />
+          )}
         </div>
       </div>
 
