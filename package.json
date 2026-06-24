@@ -19,7 +19,8 @@
     "android:init": "npx cap init \"Star-Swarm\" \"com.starswarm.game\" --web-dir=dist",
     "android:add": "npx cap add android",
     "android:sync": "npm run build && npx cap sync android",
-    "package:apk": "export ANDROID_HOME=/home/gemini/android-sdk && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 && export PATH=$PATH:$ANDROID_HOME/platform-tools && npm run android:sync && cd android && ./gradlew assembleDebug && mkdir -p ../out && cp app/build/outputs/apk/debug/app-debug.apk ../out/starswarm.apk"
+    "package:apk": "export ANDROID_HOME=/home/gemini/android-sdk && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 && export PATH=$PATH:$ANDROID_HOME/platform-tools && npm run android:sync && cd android && ./gradlew assembleDebug && mkdir -p ../out && cp app/build/outputs/apk/debug/app-debug.apk ../out/starswarm.apk",
+    "release": "node ../scripts/release.js"
   },
   "dependencies": {
     "@capacitor/core": "^8.4.0",
